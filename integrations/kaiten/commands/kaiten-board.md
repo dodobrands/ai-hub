@@ -16,10 +16,17 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 - Запрос вида «покажи доску», «экспортируй спринт», «что в бэклоге» + ссылка или board_id
 - Запрос получить список карточек / колонок на доске Kaiten
 
-## Константы
+## Резолвинг каталога скриптов
 
-```
-KAITEN_SCRIPTS = integrations/kaiten/scripts
+Каталог скриптов резолвится так, чтобы команда работала из **любого** репозитория
+(standalone-клон, subtree-overlay, marketplace-install). Выполни строку-резолвер
+перед вызовом скриптов; если bash-блоки запускаются отдельными shell'ами и
+переменная между ними не сохраняется — повтори её в начале нужного блока.
+
+```bash
+# resolve-kaiten-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
+KAITEN_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/kaiten/scripts "$PWD"/integrations/kaiten/scripts 2>/dev/null | head -1)
+# resolve-kaiten-dir:end
 ```
 
 ## Получение board_id
@@ -31,10 +38,10 @@ KAITEN_SCRIPTS = integrations/kaiten/scripts
 
 ```bash
 # Экспорт всех не-архивных карточек в файл
-integrations/kaiten/scripts/kaiten-export-board.sh <board_id> board.md
+"$KAITEN_SCRIPTS/kaiten-export-board.sh" <board_id> board.md
 
 # Или без файла — вывод в stdout
-integrations/kaiten/scripts/kaiten-export-board.sh <board_id>
+"$KAITEN_SCRIPTS/kaiten-export-board.sh" <board_id>
 ```
 
 Экспорт включает: колонки, карточки по колонкам, описания, чек-листы, Affected Services (если задан `PROPERTY_ID` или `team-config.json`).
@@ -43,26 +50,26 @@ integrations/kaiten/scripts/kaiten-export-board.sh <board_id>
 
 ```bash
 # Информация о доске
-integrations/kaiten/scripts/kaiten-spaces.sh board <board_id>
+"$KAITEN_SCRIPTS/kaiten-spaces.sh" board <board_id>
 
 # Колонки доски
-integrations/kaiten/scripts/kaiten-spaces.sh columns <board_id>
+"$KAITEN_SCRIPTS/kaiten-spaces.sh" columns <board_id>
 
 # Дорожки (lanes)
-integrations/kaiten/scripts/kaiten-spaces.sh lanes <board_id>
+"$KAITEN_SCRIPTS/kaiten-spaces.sh" lanes <board_id>
 ```
 
 ## Список карточек на доске
 
 ```bash
-integrations/kaiten/scripts/kaiten-cards.sh list <board_id>
+"$KAITEN_SCRIPTS/kaiten-cards.sh" list <board_id>
 ```
 
 ## Список досок в пространстве
 
 ```bash
 # Все доски пространства (default: $KAITEN_SPACE из .env)
-integrations/kaiten/scripts/kaiten-spaces.sh boards [space_id]
+"$KAITEN_SCRIPTS/kaiten-spaces.sh" boards [space_id]
 ```
 
 ## Настройка

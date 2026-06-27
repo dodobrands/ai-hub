@@ -6,7 +6,7 @@
 
 1. Добавь в `.env`:
    ```
-   TESTOPS_URL=https://dodobrands.qatools.cloud
+   TESTOPS_URL=https://your-company.qatools.cloud
    TESTOPS_TOKEN=your_api_token_here
    ```
 

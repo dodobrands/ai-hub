@@ -16,10 +16,17 @@ allowed-tools: ["Bash", "Read", "Glob", "Grep", "AskUserQuestion"]
 - Запрос вида «открой карточку», «посмотри задачу», «прокомментируй карточку» + ID или ссылка
 - Запрос переместить/закрыть/назначить карточку в Kaiten
 
-## Константы
+## Резолвинг каталога скриптов
 
-```
-KAITEN_SCRIPTS = integrations/kaiten/scripts
+Каталог скриптов резолвится так, чтобы команда работала из **любого** репозитория
+(standalone-клон, subtree-overlay, marketplace-install). Выполни строку-резолвер
+перед вызовом скриптов; если bash-блоки запускаются отдельными shell'ами и
+переменная между ними не сохраняется — повтори её в начале нужного блока.
+
+```bash
+# resolve-kaiten-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
+KAITEN_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/kaiten/scripts "$PWD"/integrations/kaiten/scripts 2>/dev/null | head -1)
+# resolve-kaiten-dir:end
 ```
 
 ## Получение ID из ссылки
@@ -30,13 +37,13 @@ KAITEN_SCRIPTS = integrations/kaiten/scripts
 
 ```bash
 # Получить карточку целиком
-integrations/kaiten/scripts/kaiten-cards.sh get <card_id>
+"$KAITEN_SCRIPTS/kaiten-cards.sh" get <card_id>
 
 # Получить комментарии
-integrations/kaiten/scripts/kaiten-cards.sh comments <card_id>
+"$KAITEN_SCRIPTS/kaiten-cards.sh" comments <card_id>
 
 # Получить чек-листы
-integrations/kaiten/scripts/kaiten-cards.sh checklists <card_id>
+"$KAITEN_SCRIPTS/kaiten-cards.sh" checklists <card_id>
 ```
 
 После чтения выведи: заголовок, статус (колонка), описание, ответственных, чек-листы (если есть), последние комментарии.
@@ -44,7 +51,7 @@ integrations/kaiten/scripts/kaiten-cards.sh checklists <card_id>
 ## Добавить комментарий
 
 ```bash
-integrations/kaiten/scripts/kaiten-cards.sh comment <card_id> "Текст комментария"
+"$KAITEN_SCRIPTS/kaiten-cards.sh" comment <card_id> "Текст комментария"
 ```
 
 ## Переместить в колонку
@@ -52,53 +59,68 @@ integrations/kaiten/scripts/kaiten-cards.sh comment <card_id> "Текст ком
 Если `column_id` не известен — сначала получи список колонок доски:
 
 ```bash
-integrations/kaiten/scripts/kaiten-spaces.sh columns <board_id>
+"$KAITEN_SCRIPTS/kaiten-spaces.sh" columns <board_id>
 ```
 
 Если есть `team-config.json` — используй колонки оттуда (`.kaiten.boards.sprint.columns.*`).
 
 ```bash
-integrations/kaiten/scripts/kaiten-cards.sh move <card_id> <column_id>
+"$KAITEN_SCRIPTS/kaiten-cards.sh" move <card_id> <column_id>
 ```
 
 ## Назначить ответственного
 
 ```bash
 # Получить участников карточки
-integrations/kaiten/scripts/kaiten-cards.sh members <card_id>
+"$KAITEN_SCRIPTS/kaiten-cards.sh" members <card_id>
 
 # Список пользователей пространства
-integrations/kaiten/scripts/kaiten-spaces.sh users
+"$KAITEN_SCRIPTS/kaiten-spaces.sh" users
 
 # Назначить
-integrations/kaiten/scripts/kaiten-cards.sh assign <card_id> <user_id>
+"$KAITEN_SCRIPTS/kaiten-cards.sh" assign <card_id> <user_id>
 ```
 
 ## Обновить поля карточки
 
 ```bash
 # Изменить заголовок / описание / размер / тип
-integrations/kaiten/scripts/kaiten-cards.sh update <card_id> '{"title": "Новый заголовок"}'
-integrations/kaiten/scripts/kaiten-cards.sh update <card_id> '{"description": "Новое описание"}'
+"$KAITEN_SCRIPTS/kaiten-cards.sh" update <card_id> '{"title": "Новый заголовок"}'
+"$KAITEN_SCRIPTS/kaiten-cards.sh" update <card_id> '{"description": "Новое описание"}'
 ```
 
 ## Поиск карточек
 
 ```bash
-integrations/kaiten/scripts/kaiten-cards.sh search "<текст>" [space_id]
+"$KAITEN_SCRIPTS/kaiten-cards.sh" search "<текст>" [space_id]
 ```
+
+## Привязка к родительской карточке
+
+```bash
+# Привязать карточку CHILD_ID к родителю PARENT_ID
+curl -X POST "https://{KAITEN_DOMAIN}/api/latest/cards/{PARENT_ID}/children" \
+  -H "Authorization: Bearer {KAITEN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"card_id": CHILD_ID}'
+```
+
+> **⚠️ Критичное замечание:** Тело — `{"card_id": <child_id>}` (не `children_ids`, не массив).  
+> Поля с другими именами (`children_ids`, `parent_ids`) игнорируются: запрос вернёт `200`, но связь не создастся. `403` — отдельная история (нет прав/токен), не про формат тела.
+
+Проверка успеха: в ответе `parents_ids` должен содержать ID родителя.
 
 ## Работа с чек-листами
 
 ```bash
 # Создать чек-лист
-integrations/kaiten/scripts/kaiten-cards.sh checklist <card_id> "Название"
+"$KAITEN_SCRIPTS/kaiten-cards.sh" checklist <card_id> "Название"
 
 # Добавить пункт
-integrations/kaiten/scripts/kaiten-cards.sh check-item <card_id> <checklist_id> "Пункт"
+"$KAITEN_SCRIPTS/kaiten-cards.sh" check-item <card_id> <checklist_id> "Пункт"
 
 # Отметить выполненным
-integrations/kaiten/scripts/kaiten-cards.sh toggle-check-item <card_id> <checklist_id> <item_id> true
+"$KAITEN_SCRIPTS/kaiten-cards.sh" toggle-check-item <card_id> <checklist_id> <item_id> true
 ```
 
 ## Настройка

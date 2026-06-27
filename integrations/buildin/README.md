@@ -11,6 +11,8 @@ integrations/buildin/
 ├── scripts/
 │   ├── buildin.sh            # Level 1: HTTP-клиент (curl + Bearer JWT, UI API)
 │   ├── buildin-pages.sh      # Level 2: CRUD + read (markdown) + delete-block
+│   ├── buildin-blocks.py     # Построитель транзакций для дерева блоков (вложенность)
+│   ├── md-to-blocks.py       # Конвертер Markdown → блоки (таблицы, toggle, mermaid)
 │   ├── buildin-nav.sh        # Level 2: Навигация и поиск по дереву
 │   ├── buildin-shadow.sh     # Level 2: Shadow-индекс (локальный кеш)
 │   └── buildin-login.sh      # Проверка и сохранение JWT-токена
@@ -92,12 +94,55 @@ JWT-токен живёт ~30 дней.
 # Добавить блоки (JSON)
 ./integrations/buildin/scripts/buildin-pages.sh append-blocks <id|url> '<json_blocks>'
 
+# Вставить блоки после / перед конкретным блоком (block_id — поле uuid из get-blocks)
+./integrations/buildin/scripts/buildin-pages.sh insert-blocks-after  <id|url> <block_uuid> '<json_blocks>'
+./integrations/buildin/scripts/buildin-pages.sh insert-blocks-before <id|url> <block_uuid> '<json_blocks>'
+
 # Удалить конкретный блок (не страницу!)
 ./integrations/buildin/scripts/buildin-pages.sh delete-block <block_uuid> [parent_id]
 
 # Архивировать
 ./integrations/buildin/scripts/buildin-pages.sh archive <id|url>
 ```
+
+### Расширенные блоки из Markdown
+
+`md-to-blocks.py` конвертирует Markdown-файл в дерево блоков Buildin, а
+`append-blocks`/`insert-blocks-after`/`insert-blocks-before` создают его целиком —
+включая **вложенные** блоки (таблицы, сворачиваемые секции, многоуровневые списки),
+которые плоский append выразить не может. Маппинг заголовков совпадает с выводом
+`read` (round-trip): `#`→level 1, `##`→level 2, `###`→level 3.
+
+```bash
+# Markdown → блоки → публикация в конец страницы
+DIR=integrations/buildin/scripts
+python3 $DIR/md-to-blocks.py doc.md > /tmp/blocks.json
+bash $DIR/buildin-pages.sh append-blocks <id|url> "$(cat /tmp/blocks.json)"
+```
+
+Поддерживаемые блоки:
+
+| Markdown | Блок Buildin | type |
+|---|---|---|
+| `#` … `###` | заголовок | 7 (level 1–3) |
+| `<!-- collapse -->` перед заголовком | сворачиваемая секция (всё до след. заголовка того же/высшего уровня — внутрь) | 38 |
+| `-` / `*` (вложенность по отступу) | маркированный список | 4 |
+| `1.` `2.` | нумерованный список | 5 |
+| `- [ ]` / `- [x]` | чек-лист | 3 |
+| `> текст` (ведущий эмодзи → иконка) | выноска (callout) | 13 |
+| `---` | разделитель | 9 |
+| ` ```lang ` | блок кода | 25 |
+| ` ```mermaid ` | mermaid с preview-рендером | 25 |
+| `\| таблица \|` | нативная таблица | 27 + строки 28 |
+| абзац | параграф | 1 |
+| `**bold**` `*italic*` `` `code` `` `[t](url)` | inline-форматирование | — |
+
+Опция `--shift-headings` сдвигает уровни заголовков на 1 (`##` → level 1), если
+нужны более крупные секции. Изображения и цвета текста не поддерживаются
+(требуют upload в S3 / отсутствуют в синтаксисе Markdown).
+
+`read` понимает эти типы в обратную сторону — таблицы, `<!-- collapse -->` и
+вложенность восстанавливаются при чтении страницы как Markdown.
 
 ### Shadow-индекс (локальный кеш)
 

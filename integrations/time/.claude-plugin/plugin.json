@@ -1,6 +1,8 @@
 {
   "name": "time",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "Time (Mattermost) API client — чтение каналов, сообщений, тредов",
-  "author": { "name": "AI Hub Contributors" }
+  "author": {
+    "name": "AI Hub Contributors"
+  }
 }

@@ -19,7 +19,9 @@ Usage: ./kaiten-cards.sh <command> [args...]
 Commands:
   list [board_id]                    - Список карточек (без id - все карточки \$KAITEN_SPACE)
   search <query> [space_id]          - Поиск карточек по тексту (API параметр "query")
-  get <card_id>                      - Получить карточку
+  get <card_id> [--with-comments]    - Получить карточку (с --with-comments
+                                       вмёрживает массив comments; иначе в карточке
+                                       только comments_total — текстов комментов нет)
   create <board_id> <column_id> <title> [description] [size_text] [type_id]
                                        - Создать карточку (size_text: "5 SP", type_id: число)
   update <card_id> <json_body>       - Обновить карточку
@@ -113,7 +115,17 @@ case "${1:-help}" in
         fi
         ;;
     get)
-        kaiten GET "/cards/$2"
+        # Kaiten не встраивает массив comments в объект карточки (только comments_total).
+        # blockers и checklists встроены по умолчанию; для текстов комментов нужен
+        # отдельный вызов — с --with-comments вмёрживаем их в .comments.
+        if [[ "$3" == "--with-comments" ]]; then
+            card=$(kaiten GET "/cards/$2")
+            comments=$(kaiten GET "/cards/$2/comments")
+            jq -n --argjson card "$card" --argjson comments "$comments" \
+                '$card + {comments: $comments}'
+        else
+            kaiten GET "/cards/$2"
+        fi
         ;;
     create)
         # Use jq for safe JSON escaping (prevents injection)

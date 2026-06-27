@@ -12,7 +12,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
 ## Переменные окружения
 
 Скрипты читают из `.env` в корне репозитория:
-- `TESTOPS_URL` — базовый URL инстанса (напр. `https://dodobrands.qatools.cloud`)
+- `TESTOPS_URL` — базовый URL инстанса (напр. `https://your-company.qatools.cloud`)
 - `TESTOPS_TOKEN` — персональный API-токен (Profile → API Tokens)
 
 ## Скрипты
@@ -32,7 +32,7 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
 
 | Команда | Описание | Пример |
 |---------|----------|--------|
-| `projects [query]` | Поиск проектов | `testops-api.sh projects "Linguine"` |
+| `projects [query]` | Поиск проектов | `testops-api.sh projects "MyService"` |
 | `testcases <projectId> [rql]` | Поиск тест-кейсов (AQL) | `testops-api.sh testcases 2298 'name~="Login"'` |
 | `testcase <id>` | Обзор тест-кейса | `testops-api.sh testcase 12345` |
 | `testcase-scenario <id>` | Шаги тест-кейса | `testops-api.sh testcase-scenario 12345` |

@@ -356,3 +356,4 @@ git -C $REPO_PATH diff $BASE_BRANCH...HEAD --name-only | grep -E '\.(razor|css)$
 - **Baseline-файл** позволяет замьютить pre-existing issues — не блокировать текущую доработку
 - **Warnings не блокируют** — только BLOCK findings останавливают pipeline
 - **`$STATE_FILE` и `$BASELINE_FILE`** должны быть в `.gitignore` — это рабочие артефакты
+- **Обезличенность** — при ревью кода/документации в самом `ai-hub` помечай конкретные названия компаний, внутренние ссылки/домены, реальные логины и ID как замечание (заменить на плейсхолдер). Правила — [`REVIEW_GUIDELINES.md`](../../../REVIEW_GUIDELINES.md)

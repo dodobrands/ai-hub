@@ -1,4 +1,4 @@
-# AI Hub
+# AI Hub (ИИ концентратор)
 
 Набор AI-инструментов для интеграции с разными полезными сервисами: Kaiten, Time (Mattermost), Buildin, Genie, Holst. Плюс автоматизация spike-исследований, product discovery, тестирования и диагностики.
 

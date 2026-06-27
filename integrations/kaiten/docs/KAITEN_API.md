@@ -290,6 +290,29 @@ POST /cards/{card_id}/blockers
 | GET | `/cards/{card_id}/children` | Получить дочерние карточки |
 | DELETE | `/cards/{card_id}/children/{child_id}` | Удалить связь |
 
+### Привязка дочерней карточки к родителю
+
+```json
+POST /cards/{parent_card_id}/children
+{
+  "card_id": <child_card_id>
+}
+```
+
+> **⚠️ Важно:** Тело запроса содержит `card_id` (ID дочерней карточки) — одиночное число, **не массив**.  
+> Распространённая ошибка: `{"children_ids": [...]}` или `{"parent_ids": [...]}` — поля с такими именами игнорируются, запрос возвращает `200`, но связь **не создаётся**.  
+> `403` к телу запроса отношения не имеет — это ошибка доступа (токен/права на карточку), а не формата.
+
+```bash
+# Пример: привязать карточку <child_id> к родителю <parent_id>
+curl -X POST "https://{domain}/api/latest/cards/<parent_id>/children" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"card_id": <child_id>}'
+```
+
+Ответ: `200` с объектом дочерней карточки, в котором `parents_ids` содержит ID родителя.
+
 ---
 
 ## Card External Links (Внешние ссылки)

@@ -15,7 +15,10 @@
 #   archive <page_id>                      — архивировать страницу (status: -1)
 #   get-blocks <page_id>                   — получить блоки страницы (JSON)
 #   append-blocks <page_id> <json_blocks>              — добавить блоки на страницу (transaction)
-#   insert-blocks-after <page_id> <after_block_id> <json_blocks>  — вставить блоки после конкретного блока
+#                                                        блоки могут иметь "children" (таблицы/toggle/вложенные списки)
+#   insert-blocks-after <page_id> <after_block_id> <json_blocks>   — вставить блоки после конкретного блока
+#   insert-blocks-before <page_id> <before_block_id> <json_blocks> — вставить блоки перед конкретным блоком
+#                                                        (block_id берётся из поля "uuid" в выводе get-blocks)
 #   append-text <page_id> <text>                       — добавить текстовый параграф
 #   delete-block <block_id> <parent_id>                — удалить блок
 
@@ -304,8 +307,10 @@ title = page.get('title', '(untitled)')
 print(f'# {title}')
 print()
 
-# Block types: 0=page, 1=text(empty), 4=bulleted, 5=text, 6=heading, 7=sub-heading,
-#              13=callout, 14=image, 21=bookmark, 25=code, 26=divider, 28=table-row
+# Block types: 0=page, 1=paragraph, 3=todo, 4=bulleted, 5=numbered, 6=toggle,
+#              7=heading, 9=divider, 12=quote, 13=callout, 14=image,
+#              21=bookmark, 23=equation, 25=code, 27=table (rows=28),
+#              38=toggle-heading
 def rt(segments):
     parts = []
     for s in (segments or []):
@@ -343,18 +348,48 @@ def render(node_ids, indent=0):
                 print()
             else:
                 print()
+        elif t == 3:
+            checked = '☑' if d.get('checked') else '☐'
+            print(f'{pfx}{checked} {text}')
         elif t == 5:
-            print(f'{pfx}{text}')
-            print()
+            print(f'{pfx}1. {text}')
         elif t == 4:
             print(f'{pfx}- {text}')
         elif t == 6:
-            h = '#' * min(level, 3)
-            print(f'{pfx}{h} {text}')
+            print(f'{pfx}▶ {text}')
             print()
         elif t == 7:
-            h = '#' * min(level + 1, 4)
+            # level N → N решёток, чтобы round-trip с md-to-blocks.py был точным
+            # (md-to-blocks по умолчанию: '#'→level1, '##'→level2, '###'→level3).
+            h = '#' * min(level, 6)
             print(f'{pfx}{h} {text}')
+            print()
+        elif t == 38:
+            # Сворачиваемый заголовок-секция — round-trip с маркером <!-- collapse -->
+            h = '#' * min(level, 6)
+            print(f'{pfx}<!-- collapse -->')
+            print(f'{pfx}{h} {text}')
+            print()
+        elif t == 27:
+            # Таблица: строки — дети типа 28, ячейки в collectionProperties
+            fmt = d.get('format', {})
+            cols = fmt.get('tableBlockColumnOrder', [])
+            rows = []
+            for rid in sub:
+                rb = blocks.get(rid, {})
+                cp = rb.get('data', {}).get('collectionProperties', {})
+                rows.append([rt(cp.get(c, [])) for c in cols])
+            for ri, row in enumerate(rows):
+                print(f'{pfx}| ' + ' | '.join(row) + ' |')
+                if ri == 0 and fmt.get('tableBlockRowHeader'):
+                    print(f'{pfx}| ' + ' | '.join(['---'] * len(cols)) + ' |')
+            print()
+            continue
+        elif t == 9:
+            print(f'{pfx}---')
+            print()
+        elif t == 12:
+            print(f'{pfx}> {text}')
             print()
         elif t == 13:
             icon = d.get('icon', {}).get('value', '')
@@ -369,14 +404,15 @@ def render(node_ids, indent=0):
             link = d.get('link', '')
             print(f'{pfx}[{text or link}]({link})')
             print()
+        elif t == 23:
+            print(f'{pfx}$$ {text} $$')
+            print()
         elif t == 25:
-            lang = d.get('language', '')
+            # Buildin хранит язык в format.language (data.language = null)
+            lang = (d.get('language') or d.get('format', {}).get('language', '') or '').lower()
             print(f'{pfx}\`\`\`{lang}')
             print(f'{pfx}{text}')
             print(f'{pfx}\`\`\`')
-            print()
-        elif t == 26:
-            print(f'{pfx}---')
             print()
         elif text:
             print(f'{pfx}{text}')
@@ -398,63 +434,7 @@ render(page.get('subNodes', []))
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
         USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
 
-        OPS=$(python3 -c "
-import json, sys, uuid
-
-page_id = sys.argv[1]
-space_id = sys.argv[2]
-now = int(sys.argv[3])
-user_id = sys.argv[4]
-blocks_json = sys.argv[5]
-
-blocks = json.loads(blocks_json)
-ops = []
-
-for block in blocks:
-    block_id = str(uuid.uuid4())
-    block_type = block.get('type', 5)
-    block_data = block.get('data', {})
-
-    ops.append({
-        'id': block_id,
-        'command': 'set',
-        'table': 'block',
-        'path': [],
-        'args': {
-            'uuid': block_id,
-            'spaceId': space_id,
-            'parentId': page_id,
-            'type': block_type,
-            'textColor': '',
-            'backgroundColor': '',
-            'status': 1,
-            'permissions': [],
-            'createdAt': now,
-            'createdBy': user_id,
-            'updatedBy': user_id,
-            'updatedAt': now,
-            'data': {**{'pageFixedWidth': True, 'format': {'commentAlignment': 'top'}}, **block_data}
-        }
-    })
-    ops.append({
-        'id': page_id,
-        'command': 'listAfter',
-        'table': 'block',
-        'path': ['subNodes'],
-        'args': {'uuid': block_id}
-    })
-
-# Update page timestamp
-ops.append({
-    'id': page_id,
-    'command': 'update',
-    'table': 'block',
-    'path': [],
-    'args': {'updatedBy': user_id, 'updatedAt': now}
-})
-
-print(json.dumps(ops))
-" "$PAGE_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON")
+        OPS=$(python3 "$SCRIPT_DIR/buildin-blocks.py" "$PAGE_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON")
 
         transaction "$SPACE_ID" "$OPS"
         ;;
@@ -469,67 +449,41 @@ print(json.dumps(ops))
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
         USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
 
-        OPS=$(python3 -c "
-import json, sys, uuid
-
-page_id = sys.argv[1]
-after_block_id = sys.argv[2]
-space_id = sys.argv[3]
-now = int(sys.argv[4])
-user_id = sys.argv[5]
-blocks_json = sys.argv[6]
-
-blocks = json.loads(blocks_json)
-ops = []
-prev_id = after_block_id
-
-for block in blocks:
-    block_id = str(uuid.uuid4())
-    block_type = block.get('type', 1)
-    block_data = block.get('data', {})
-
-    ops.append({
-        'id': block_id,
-        'command': 'set',
-        'table': 'block',
-        'path': [],
-        'args': {
-            'uuid': block_id,
-            'spaceId': space_id,
-            'parentId': page_id,
-            'type': block_type,
-            'textColor': '',
-            'backgroundColor': '',
-            'status': 1,
-            'permissions': [],
-            'createdAt': now,
-            'createdBy': user_id,
-            'updatedBy': user_id,
-            'updatedAt': now,
-            'data': {**{'pageFixedWidth': True, 'format': {'commentAlignment': 'top'}}, **block_data}
-        }
-    })
-    ops.append({
-        'id': page_id,
-        'command': 'listAfter',
-        'table': 'block',
-        'path': ['subNodes'],
-        'args': {'uuid': block_id, 'after': prev_id}
-    })
-    prev_id = block_id
-
-ops.append({
-    'id': page_id,
-    'command': 'update',
-    'table': 'block',
-    'path': [],
-    'args': {'updatedBy': user_id, 'updatedAt': now}
-})
-
-print(json.dumps(ops))
-" "$PAGE_ID" "$AFTER_BLOCK_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON")
+        OPS=$(python3 "$SCRIPT_DIR/buildin-blocks.py" "$PAGE_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON" "$AFTER_BLOCK_ID")
 
         transaction "$SPACE_ID" "$OPS"
+        ;;
+
+    insert-blocks-before)
+        PAGE_ID=$(parse_id "$1")
+        BEFORE_BLOCK_ID=$(parse_id "$2")
+        BLOCKS_JSON="$3"
+        [[ -z "$PAGE_ID" || -z "$BEFORE_BLOCK_ID" || -z "$BLOCKS_JSON" ]] && { echo "Usage: insert-blocks-before <page_id|url> <before_block_id> <json_blocks>" >&2; exit 1; }
+
+        # Найти предыдущего соседа целевого блока среди верхнеуровневых блоков
+        # страницы. Если он есть — это обычный insert-after (проверенный путь);
+        # если целевой блок первый — вставляем в начало через listBefore.
+        PREV=$(buildin GET "/api/docs/$PAGE_ID" | python3 -c "
+import json, sys
+page_id, before = sys.argv[1], sys.argv[2]
+blocks = json.load(sys.stdin).get('data', {}).get('blocks', {})
+sub = blocks.get(page_id, {}).get('subNodes', [])
+if before not in sub:
+    sys.stderr.write('not_found')
+    sys.exit(3)
+i = sub.index(before)
+print(sub[i - 1] if i > 0 else '')
+" "$PAGE_ID" "$BEFORE_BLOCK_ID") || { echo "Error: блок $BEFORE_BLOCK_ID не найден среди верхнеуровневых блоков страницы (вложенные блоки не поддерживаются)" >&2; exit 1; }
+
+        if [[ -n "$PREV" ]]; then
+            bash "$SCRIPT_DIR/buildin-pages.sh" insert-blocks-after "$PAGE_ID" "$PREV" "$BLOCKS_JSON"
+        else
+            SPACE_ID=$(get_space_id "$PAGE_ID")
+            NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+            USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+            OPS=$(python3 "$SCRIPT_DIR/buildin-blocks.py" "$PAGE_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON" "" "$BEFORE_BLOCK_ID")
+            transaction "$SPACE_ID" "$OPS"
+        fi
         ;;
 
     append-text)
@@ -540,7 +494,7 @@ print(json.dumps(ops))
         BLOCKS=$(python3 -c "
 import json, sys
 text = sys.argv[1]
-blocks = [{'type': 5, 'data': {'segments': [{'type': 0, 'text': text, 'enhancer': {}}]}}]
+blocks = [{'type': 1, 'data': {'segments': [{'type': 0, 'text': text, 'enhancer': {}}]}}]
 print(json.dumps(blocks))
 " "$TEXT")
 
@@ -549,15 +503,14 @@ print(json.dumps(blocks))
 
     delete-block)
         BLOCK_ID=$(parse_id "$1")
-        PARENT_ID=$(parse_id "${2:-}")
-        [[ -z "$BLOCK_ID" ]] && { echo "Usage: delete-block <block_id> [parent_id]" >&2; exit 1; }
+        [[ -z "$BLOCK_ID" ]] && { echo "Usage: delete-block <block_id>" >&2; exit 1; }
 
-        # Auto-detect parent if not provided
-        if [[ -z "$PARENT_ID" ]]; then
-            BLOCK_INFO=$(buildin GET "/api/blocks/$BLOCK_ID")
-            PARENT_ID=$(echo "$BLOCK_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('parentId',''))")
-        fi
-        [[ -z "$PARENT_ID" ]] && { echo "Error: cannot determine parentId for $BLOCK_ID" >&2; exit 1; }
+        # Resolve the block's real parent and use it as source of truth. A wrong block_id
+        # (e.g. a page_id) otherwise returns a misleading code 200; for a page that means
+        # status=-1 on the page block — silently deleting the whole page.
+        DETECTED_PARENT=$(buildin GET "/api/blocks/$BLOCK_ID" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('parentId',''))")
+        [[ -z "$DETECTED_PARENT" ]] && { echo "Error: $BLOCK_ID not found or is a page (no parent block); refusing to delete" >&2; exit 1; }
+        PARENT_ID="$DETECTED_PARENT"
 
         SPACE_ID=$(get_space_id "$BLOCK_ID")
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
@@ -589,9 +542,10 @@ print(json.dumps(ops))
         echo "  create <parent_id|url> <title>           — создать дочернюю страницу"
         echo "  update <id|url> <title>                  — обновить заголовок"
         echo "  archive <id|url>                         — архивировать (status: -1)"
-        echo "  get-blocks <id|url>                      — блоки страницы (JSON)"
+        echo "  get-blocks <id|url>                      — блоки страницы (JSON; id блока в поле uuid)"
         echo "  append-blocks <id|url> <json_blocks>     — добавить блоки в конец страницы"
-        echo "  insert-blocks-after <id|url> <after_block_id> <json_blocks>  — вставить блоки после конкретного блока"
+        echo "  insert-blocks-after <id|url> <after_block_id> <json_blocks>   — вставить блоки после блока"
+        echo "  insert-blocks-before <id|url> <before_block_id> <json_blocks> — вставить блоки перед блоком"
         echo "  append-text <id|url> <text>              — добавить текстовый параграф"
         echo "  delete-block <block_id> [parent_id]      — удалить блок"
         ;;

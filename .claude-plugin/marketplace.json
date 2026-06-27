@@ -53,7 +53,7 @@
     {
       "name": "buildin",
       "description": "Buildin.ai wiki page management — create and update documentation pages",
-      "version": "2.1.2",
+      "version": "2.2.2",
       "author": {
         "name": "AI Hub Contributors"
       },

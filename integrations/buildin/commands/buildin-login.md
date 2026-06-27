@@ -9,15 +9,36 @@ allowed-tools: ["Bash", "mcp"]
 
 ## Workflow
 
+Каталог скриптов резолвится так, чтобы команда работала из **любого** репозитория
+(standalone-клон, subtree-overlay, marketplace-install). Выполни строку-резолвер
+перед вызовом скриптов; если bash-блоки запускаются отдельными shell'ами и
+переменная между ними не сохраняется — повтори её в начале нужного блока.
+
+```bash
+# resolve-buildin-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
+BUILDIN_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/buildin/scripts "$PWD"/integrations/buildin/scripts 2>/dev/null | head -1)
+# resolve-buildin-dir:end
+```
+
 ### Step 0: Проверь существующий токен
 
 ```bash
-bash integrations/buildin/scripts/buildin-login.sh check
+bash "$BUILDIN_SCRIPTS/buildin-login.sh" check
 ```
 
 Если вывод `ok Name (email)` — токен валиден. Покажи: «Токен ещё валиден. Залогинен как Name.»
 
 Если `error:*` — продолжай к Step 1.
+
+### Step 0.5: Попробуй cookie из браузера (быстрый путь)
+
+Перед использованием MCP попробуй извлечь токен из cookie-store Chrome напрямую — это быстрее и не требует открытия браузера:
+
+```bash
+bash integrations/buildin/scripts/buildin-login.sh cookie
+```
+
+Если вывод `ok Name (via chrome/...)` — готово, переходи к использованию. Если ошибка — продолжай к Step 1.
 
 ### Step 1: Определи доступный MCP
 
@@ -29,7 +50,7 @@ document.cookie.match(/next_auth=([^;]+)/)?.[1]
 ```
 Затем вставит токен:
 ```bash
-bash integrations/buildin/scripts/buildin-login.sh save "<token>"
+bash "$BUILDIN_SCRIPTS/buildin-login.sh" save "<token>"
 ```
 
 ### Step 2: Открой Buildin в браузере
@@ -64,7 +85,7 @@ bash integrations/buildin/scripts/buildin-login.sh save "<token>"
 2. Если `status: 'copied'` — запусти скрипт (он читает clipboard, валидирует, сохраняет, очищает clipboard):
 
 ```bash
-bash integrations/buildin/scripts/buildin-login.sh clipboard
+bash "$BUILDIN_SCRIPTS/buildin-login.sh" clipboard
 ```
 
 ### Step 4: Обработай результат
@@ -81,7 +102,7 @@ bash integrations/buildin/scripts/buildin-login.sh clipboard
 # 2. В DevTools Console:
 #    document.cookie.match(/next_auth=([^;]+)/)?.[1]
 # 3. Скопируй результат и запусти:
-bash integrations/buildin/scripts/buildin-login.sh save "<вставь_токен>"
+bash "$BUILDIN_SCRIPTS/buildin-login.sh" save "<вставь_токен>"
 ```
 
 ## Security

@@ -1,6 +1,6 @@
 ---
 name: spike
-description: "Generic spike research workflow for a Kaiten card (team-agnostic, no domain assumptions). For Dodo/SOM — prefer spike-som."
+description: "Generic spike research workflow for a Kaiten card (team-agnostic, no domain assumptions). A team overlay may ship a localized variant — prefer it when present."
 argument-hint: <card_id>
 allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "WebSearch", "WebFetch"]
 ---

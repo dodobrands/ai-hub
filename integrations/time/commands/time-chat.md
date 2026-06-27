@@ -36,23 +36,31 @@ allowed-tools: ["Bash", "Read", "Glob", "Grep", "Agent", "AskUserQuestion"]
 
 ### Phase 0: Инициализация
 
+Каталог скриптов резолвится так, чтобы команда работала из **любого** репозитория
+(standalone-клон, subtree-overlay, marketplace-install). Выполни строку-резолвер
+перед вызовом скриптов; если bash-блоки запускаются отдельными shell'ами и
+переменная между ними не сохраняется — повтори её в начале нужного блока.
+
 ```bash
-chmod +x integrations/time/scripts/*.sh
+# resolve-time-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
+TIME_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/time/scripts "$PWD"/integrations/time/scripts 2>/dev/null | head -1)
+# resolve-time-dir:end
+chmod +x "$TIME_SCRIPTS"/*.sh
 ```
 
 Определи доступные режимы — проверь, кто отвечает:
 ```bash
-integrations/time/scripts/time-channels.sh me | jq '{username, email}'
+"$TIME_SCRIPTS/time-channels.sh" me | jq '{username, email}'
 ```
 Если ошибка — попробуй другой режим:
 ```bash
-integrations/time/scripts/time-channels.sh --as bot me | jq '{username}'
+"$TIME_SCRIPTS/time-channels.sh" --as bot me | jq '{username}'
 ```
 
 ### Phase 1: Определи Team ID
 
 ```bash
-integrations/time/scripts/time-channels.sh my-teams | jq '.[] | {id, display_name}'
+"$TIME_SCRIPTS/time-channels.sh" my-teams | jq '.[] | {id, display_name}'
 ```
 
 ### Phase 2: Выполни запрошенное действие
@@ -61,7 +69,7 @@ integrations/time/scripts/time-channels.sh my-teams | jq '.[] | {id, display_nam
 
 **Найти канал (включая приватные, с кэшем 30 мин):**
 ```bash
-integrations/time/scripts/time-channels.sh find <team_id> "<term>"
+"$TIME_SCRIPTS/time-channels.sh" find <team_id> "<term>"
 ```
 
 **Прочитать сообщения канала:**
@@ -72,36 +80,36 @@ integrations/time/scripts/time-channels.sh find <team_id> "<term>"
 
 **Прочитать тред (по post_id или permalink):**
 ```bash
-integrations/time/scripts/time-messages.sh thread <post_id>
-integrations/time/scripts/time-messages.sh thread "https://<host>/<team>/pl/<post_id>" --resolve-users
+"$TIME_SCRIPTS/time-messages.sh" thread <post_id>
+"$TIME_SCRIPTS/time-messages.sh" thread "https://<host>/<team>/pl/<post_id>" --resolve-users
 ```
 
 **Прочитать один пост (по post_id или permalink):**
 ```bash
-integrations/time/scripts/time-messages.sh get "https://<host>/<team>/pl/<post_id>"
+"$TIME_SCRIPTS/time-messages.sh" get "https://<host>/<team>/pl/<post_id>"
 ```
 
 **Найти сообщения:**
 ```bash
-integrations/time/scripts/time-messages.sh search <team_id> "<terms>" --resolve-users
+"$TIME_SCRIPTS/time-messages.sh" search <team_id> "<terms>" --resolve-users
 ```
 
 **Direct messages с пользователем (auto-enriched):**
 ```bash
-integrations/time/scripts/time-messages.sh dm @<username> [limit]
+"$TIME_SCRIPTS/time-messages.sh" dm @<username> [limit]
 ```
 
 **Список / поиск пользователей:**
 ```bash
-integrations/time/scripts/time-messages.sh users               # первые 50
-integrations/time/scripts/time-messages.sh users "<term>"      # поиск
+"$TIME_SCRIPTS/time-messages.sh" users               # первые 50
+"$TIME_SCRIPTS/time-messages.sh" users "<term>"      # поиск
 ```
 
 ⚠️ **Ограничения Mattermost search** — учитывай ДО того, как делать вывод «ничего не найдено»:
-- **Литеральный match по словам**: «не могу создать заявку» в канале `elma365-feedback` НЕ найдётся по запросу `elma` — контекст канала не индексируется.
+- **Литеральный match по словам**: «не могу создать заявку» в канале `support-feedback` НЕ найдётся по запросу `support` — контекст канала не индексируется.
 - **Лимит ~60 результатов**: старые сообщения выпадают.
-- **Модификаторы**: `from:username` работает только если стоит **первым** (`from:a.zhuravlev elma` — ок; `elma from:a.zhuravlev` — вернёт 0).
-- **Wildcard**: `эльм*` матчит словоформы, но не спасает от литеральности.
+- **Модификаторы**: `from:username` работает только если стоит **первым** (`from:j.doe deploy` — ок; `deploy from:j.doe` — вернёт 0).
+- **Wildcard**: `dep*` матчит словоформы, но не спасает от литеральности.
 
 **Поиск сообщений пользователя по теме (правильный порядок):**
 1. **Сначала** найди тематические каналы — в названии/purpose: `time-channels.sh find <team_id> "<topic>"`.
@@ -111,18 +119,25 @@ integrations/time/scripts/time-messages.sh users "<term>"      # поиск
 
 **Мои посты в канале (с автопагинацией):**
 ```bash
-integrations/time/scripts/time-messages.sh my-posts <channel_id> [max_posts]
+"$TIME_SCRIPTS/time-messages.sh" my-posts <channel_id> [max_posts]
 ```
 
 **Отправить сообщение (выбери режим по контексту!):**
 ```bash
 # От личного аккаунта — уточнение, вопрос коллеге
-integrations/time/scripts/time-messages.sh --as me send <channel_id> "<message>" [root_id]
+"$TIME_SCRIPTS/time-messages.sh" --as me send <channel_id> "<message>" [root_id]
 
 # От бота — changelog, уведомление, результат автоматизации
-integrations/time/scripts/time-messages.sh --as bot send <channel_id> "<message>" [root_id]
+"$TIME_SCRIPTS/time-messages.sh" --as bot send <channel_id> "<message>" [root_id]
 ```
 ⚠️ **ОБЯЗАТЕЛЬНО** подтверди у пользователя: текст, адресата и режим (бот/личный).
+
+**Markdown при отправке (Time = Mattermost).** Сообщение рендерится как Mattermost-markdown. Главное про чек-листы:
+- **Чекбокс `- [ ]` рендерится только line-leading** — пункт обязан начинаться с начала строки (`\n- [ ]<пробел>текст`), по одному на строку. Перед первым пунктом — перевод строки.
+- **Инлайн не работает:** `Критерии: - [ ] a; - [ ] b` отрендерится буквально как «тире и квадратные скобки», не как чекбоксы. Не склеивай пункты через `;` и не лепи их в конец фразы после двоеточия.
+- Остальной markdown (`**жирный**`, `` `code` ``, ссылки `[текст](url)`, нумерованные/маркированные списки) работает стандартно, тоже от начала строки.
+
+> Скрипт `send` шлёт текст **как есть** (не нормализует) — за корректную разметку отвечает составитель сообщения.
 
 ### Phase 3: Форматирование результата
 
