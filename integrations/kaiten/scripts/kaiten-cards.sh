@@ -172,6 +172,10 @@ case "${1:-help}" in
         ;;
     assign)
         [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 assign <card_id> <user_id>" >&2; exit 1; }
+        # Числовые id: оба подставляются в endpoint И в тело — нечисловое значение иначе ломает путь
+        # или инъектит JSON. Валидируем + собираем тело через jq (как в block/create/comment).
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: card_id must be numeric, got '$2'" >&2; exit 1; }
+        [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: user_id must be numeric, got '$3'" >&2; exit 1; }
         # «Ответственный» в Kaiten — участник карточки с type 2 (type 1 — обычный участник; именно
         # type 2 попадает в фильтр responsible_ids). POST /members создаёт членство и ИГНОРИРУЕТ
         # переданный type — роль поднимает только PATCH. Делаем оба шага, идемпотентно:
@@ -179,7 +183,7 @@ case "${1:-help}" in
         # роль всё равно выставит PATCH ниже. stderr POST придерживаем: печатаем его, ТОЛЬКО если и
         # PATCH упал (тогда POST-ошибка точнее про корень — неверный user_id / нет карточки, чем
         # 404 от PATCH по несозданному членству); при успешном PATCH — молчим (идемпотентный путь).
-        post_err="$(kaiten POST "/cards/$2/members" "{\"user_id\": $3}" 2>&1 >/dev/null)" || true
+        post_err="$(kaiten POST "/cards/$2/members" "$(jq -n --argjson user_id "$3" '{user_id: $user_id}')" 2>&1 >/dev/null)" || true
         if ! kaiten PATCH "/cards/$2/members/$3" "{\"type\": 2}"; then
             [[ -n "$post_err" ]] && printf '%s\n' "$post_err" >&2
             exit 1
