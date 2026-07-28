@@ -35,6 +35,11 @@ METHOD="${1:-GET}"
 ENDPOINT="${2:-/users/current}"
 BODY="$3"
 
+# Эндпоинт склеивается с базой как есть (${KAITEN_API}${ENDPOINT}), поэтому без ведущего
+# слэша получается ".../api/latestspaces" — Kaiten отвечает 401, и выглядит это как
+# «не хватает прав», хотя токен в порядке. Нормализуем, чтобы обе формы работали.
+[[ "$ENDPOINT" == /* ]] || ENDPOINT="/$ENDPOINT"
+
 # Access control levels (cumulative):
 #   1 | read                — GET/HEAD only
 #   2 | read_write          — + POST/PUT/PATCH (no archive)

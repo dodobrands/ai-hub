@@ -1,1 +1,0 @@
-../../../integrations/development/commands/dev-investigate.md
