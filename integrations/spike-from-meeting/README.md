@@ -46,28 +46,80 @@
 
 - `ffmpeg` — для извлечения кадров и GIF. Установка: `brew install ffmpeg`
 - `curl`, `jq` — для Kontur.Talk API
-- `KTALK_SESSION_TOKEN` env var — значение cookie `sessionToken` из Chrome для tenant'а (например `<tenant>.ktalk.ru`). Получить: залогиниться в браузере → DevTools → Application → Cookies → скопировать. Для агентов в Claude Code — через `chrome-devtools` MCP можно автоматически.
+- Токен Контур.Толк — один из двух, скрипты пробуют их каскадом:
+  - **`KTALK_TOKEN`** (основной) — ключ API: tenant → Администрирование → Ключи API → создать
+    и скопировать (после выпуска ключ виден один час). Не истекает до заданной при выпуске
+    даты, поэтому годится для автоматизации и cron. Кладётся в `.env`.
+  - **`KTALK_SESSION_TOKEN`** (фоллбек) — значение cookie `sessionToken` из браузера для
+    tenant'а (например `your-company.ktalk.ru`): залогиниться → DevTools → Application →
+    Cookies → скопировать. Для агентов в Claude Code — автоматически через `chrome-devtools` MCP.
+    Живёт недолго; нужна там, где ключ API не принимается (см. таблицу ниже).
+
+  Значения из окружения приоритетнее `.env` — cookie обычно достают ad-hoc и передают
+  через `export`. Если ключ вернёт 401/403, скрипты сами напишут об этом в stderr и
+  повторят запрос с cookie.
 
 ## Скрипты
 
+- `scripts/ktalk-auth.sh` — не запускается сам, его `source`-ят остальные `kontur-talk-*.sh`:
+  общая авторизация каскадом (`KTALK_TOKEN` → при 401/403 `KTALK_SESSION_TOKEN`), загрузка
+  `.env` через общий `hub_load_env`. Функция `ktalk_fetch <url> <out> [curl-args…]` печатает
+  «`<HTTP-код> <режим>`» — разбирается через `read -r status mode <<<"$(…)"`.
 - `scripts/extract-frame.sh <video> <HH:MM:SS> <output.png>` — один кадр
 - `scripts/extract-gif.sh <video> <HH:MM:SS> <duration_sec> <output.gif>` — короткий GIF
-- `scripts/kontur-talk-transcript.sh <recording_url>` — забор транскрипта через API (`KTALK_SESSION_TOKEN` из env)
+- `scripts/kontur-talk-find-recording.sh --tenant <host> [--date YYYY-MM-DD] [--room <roomName>] [--email <email>] [<title_regex>]`
+  — найти ссылку на запись, когда URL неизвестен. Вывод: `<дата>\t<title>\t<url>\t<duration>s`,
+  exit 3 — не найдено
+- `scripts/kontur-talk-transcript.sh <recording_url>` — забор транскрипта через API
 - `scripts/kontur-talk-video.sh <recording_url> <out.mp4> [quality]` — скачать MP4
 
-## Карта Контур.Толк API (верифицирована 2026-05-12)
+## Карта Контур.Толк API
 
-| Эндпоинт | Зачем |
-|----------|-------|
-| `GET /api/recordings/{id}` | Метаданные: title, duration, qualities[], participants[] |
-| `GET /api/recordings/v2/{id}/summary` | Полный транскрипт (`transcriptionV2`) + AI-протокол + summary |
-| `GET /api/conferenceshistory/v2/{conferenceKey}` | Chat-сообщения и участники |
-| `GET /recording-blob/{id}/{quality}` | MP4 (с Range) |
+Проверено на реальном ktalk-tenant'е: базовые эндпоинты 2026-05-12, поведение ключа API — 2026-07-28.
 
-Auth для всех: `Authorization: Session <sessionToken>` + `x-platform: web`.
+| Эндпоинт | Зачем | Ключ API | Cookie |
+|----------|-------|----------|--------|
+| `GET /api/domain/recordings?skip=&top=[&query=]` | Записи всего домена, новые сверху | ✅ | ✅ |
+| `GET /api/recordings/{id}` | Метаданные: title, duration, qualities[], participants[] | ✅ | ✅ |
+| `GET /api/recordings/v2/{id}/summary` | Полный транскрипт (`transcriptionV2`) + summary | ✅ | ✅ |
+| `GET /api/recordings/{id}/transcript` | Транскрипт с word-level таймингами | ✅ | ✅ |
+| `GET /api/recordings/{id}/transcript/file` | Транскрипт готовым текстом | ✅ | ✅ |
+| `GET /api/recordings/{id}/summary/file` | AI-протокол встречи (участники, темы) | ✅ | ✅ |
+| `GET /api/conferenceshistory/v2/{conferenceKey}` | Chat-сообщения и участники | ✅ | ✅ |
+| `GET /recording-blob/{id}/{quality}` | MP4 (с Range) | ✅ | ✅ |
+| `GET /api/conferenceshistory?top=` | Личная история встреч | ❌ 401 | ✅ |
+| `GET /api/rooms/{roomName}/recordings` | Записи комнаты | ❌ 401 | ✅ |
+| `GET /api/calendar?start=&end=` | События календаря | ❌ 401 | ✅ |
+
+Auth: `X-Auth-Token: <ключ API>` либо `Authorization: Session <sessionToken>`, плюс
+`x-platform: web`. Ключу API закрыты **персональные** ресурсы (моя история, мой календарь):
+у ключа нет владельца, поэтому «мои» для него не определено — вместо них он ходит в доменный
+листинг `/api/domain/recordings`.
+
+**Грабли `/api/domain/recordings`:**
+
+- идентификатор записи — в поле **`key`** (поле `id` всегда `null`); он же идёт в URL
+  `/recordings/<key>` и в `/api/recordings/<key>/…`;
+- серверный фильтр только один — `query` (подстрока названия); по дате, комнате и автору
+  фильтруй сам по полям ответа (`createdDate` в UTC, `roomName`, `createdBy.email`);
+- сортировка по `createdDate` убыванию, так что для «записей за день» хватает первой
+  страницы и раннего выхода из пагинации;
+- `title` здесь — название ЗАПИСИ (обычно название комнаты), а в личной истории — тема
+  КОНФЕРЕНЦИИ; для одной встречи они расходятся, поэтому постоянные встречи ищи по `roomName`.
 
 ## Версия
 
+- **0.4.0** (2026-07-28) — авторизация ключом API + поиск записи по дате/комнате:
+  - **`KTALK_TOKEN` (ключ API) как основной способ**, cookie — фоллбек. Ключ не истекает,
+    так что сценарии вроде ежедневного отчёта перестают ломаться от протухшей сессии
+    (в 0.2.0 переходили в обратную сторону — тогда доменного листинга ещё не знали)
+  - **Новый `kontur-talk-find-recording.sh`** — находит запись по названию / комнате /
+    автору и дате, когда URL неизвестен: ключом через `/api/domain/recordings`,
+    по cookie — через личную историю встреч
+  - **Новый `ktalk-auth.sh`** — общая авторизация каскадом: при 401/403 по ключу запрос
+    автоматически повторяется с cookie, с предупреждением в stderr
+  - **Bats-юниты** на каскад (`tests/ktalk-auth.bats`, сеть не нужна — `curl` подменяется стабом)
+  - Карта API дополнена: что доступно ключу, что только по cookie, и грабли доменного листинга
 - **0.3.0** (2026-05-12) — Урок-driven итерация после двух реальных прогонов:
   - **Новый пресет `dual-artifact`** (длинная статья + короткий Slack-пост в одной папке) — типовой запрос
   - **Phrase-based timecode hints** (Этап 4.3): таблица «фраза в транскрипте → типовое смещение» — экономит 1-2 итерации на кадр
