@@ -35,7 +35,13 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "WebFet
 
 Если в `$ARGUMENTS` URL вида `https://<tenant>.ktalk.ru/recordings/<id>` (например `<tenant>.ktalk.ru/recordings/...`) или `talk.kontur.ru/recordings/<id>`:
 
-**Auth flow (cookies из браузера, без API-ключа):**
+**Auth flow (ключ API, cookie — фоллбек):**
+
+0. **Сначала проверь ключ API** — `KTALK_TOKEN` в `.env` (tenant → Администрирование →
+   Ключи API). Если он есть, cookie не нужна вообще: и поиск записи, и транскрипт, и метаданные,
+   и скачивание видео идут по заголовку `X-Auth-Token`, а ключ не истекает. Скрипты сами
+   переключатся на cookie, если ключ вернёт 401/403. Шаги 1–2 ниже — только когда ключа нет
+   или нужен эндпоинт, который ключу закрыт (личная история встреч, календарь — см. карту API).
 
 1. **Получи session token из Chrome cookies** — это самый быстрый путь, потому что Kontur.Talk использует SSO. Через chrome-devtools MCP (доступен в Claude Code):
    ```
@@ -52,21 +58,57 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Task", "WebFet
 
 3. **Запусти `scripts/kontur-talk-transcript.sh <url>`** — он:
    - Распарсит URL (tenant + recording_id)
-   - Вызовет `GET /api/recordings/v2/{id}/summary` с `Authorization: Session <token>`
+   - Подхватит токены из `.env`, если их нет в окружении; приоритет — `KTALK_TOKEN`
+   - Вызовет `GET /api/recordings/v2/{id}/summary` с `X-Auth-Token` (ключ API)
+     или `Authorization: Session <token>` (cookie-фоллбек)
    - Распарсит `transcriptionV2.tracks[].chunks[]` и выдаст плоский транскрипт в формате `HH:MM:SS<TAB>Имя<TAB>Текст` на stdout
    - Метаданные (title, duration, video_url, participants_count) в stderr как JSON
 4. **Скачай видео:** `scripts/kontur-talk-video.sh <url> <output.mp4> [quality]` (по умолчанию — highest, обычно 900p).
 
-**Карта API (верифицирована на 2026-05-12, реальный ktalk-tenant; работает на любом `*.ktalk.ru`):**
+### Режим C — URL записи неизвестен
 
-| Эндпоинт | Что возвращает |
-|----------|----------------|
-| `GET /api/recordings/{id}` | Метаданные: title, duration, conferenceKey, qualities[] (240p/900p), transcriptionUrl, participants[] |
-| `GET /api/recordings/v2/{id}/summary` | `transcriptionV2.tracks[].chunks[]` (полный транскрипт), `shortSummaryV2`, `protocolV2` (AI-протокол) |
-| `GET /api/conferenceshistory/v2/{conferenceKey}` | Chat-сообщения встречи, участники |
-| `GET /recording-blob/{id}/{quality}` | MP4 видеопоток (с Range-поддержкой) |
+Если пользователь назвал встречу, а не дал ссылку («сделай конспект сегодняшнего дейли»),
+найди запись сам:
 
-Заголовок auth для всех: `Authorization: Session <sessionToken>` + `x-platform: web`.
+```bash
+scripts/kontur-talk-find-recording.sh --tenant your-company.ktalk.ru \
+  --room <roomName>            # либо <title_regex>, либо --email <кто записал>
+# [--date YYYY-MM-DD], по умолчанию сегодня (UTC)
+```
+
+Вывод: `<дата>\t<title>\t<recording_url>\t<duration>s`, новые сверху. Если записей несколько —
+бери подходящую по времени и **самую длинную** (бывают обрывки на несколько секунд).
+Exit 3 — записи нет: возможно, ещё обрабатывается; скажи об этом пользователю.
+
+Для регулярных встреч фильтруй по `--room`: тему конференции могут переименовать, а
+`roomName` постоянный. Ищется по ключу API (`/api/domain/recordings`), а если его нет —
+по cookie через личную историю встреч.
+
+**Карта API** (базовые эндпоинты верифицированы 2026-05-12, поведение ключа API — 2026-07-28;
+реальный ktalk-tenant, работает на любом `*.ktalk.ru`):
+
+| Эндпоинт | Что возвращает | Ключ API | Cookie |
+|----------|----------------|----------|--------|
+| `GET /api/domain/recordings?skip=&top=[&query=]` | Записи всего домена, новые сверху: `key`, title, roomName, createdDate, duration, createdBy.email | ✅ | ✅ |
+| `GET /api/recordings/{id}` | Метаданные: title, duration, conferenceKey, qualities[] (240p/900p), transcriptionUrl, participants[] | ✅ | ✅ |
+| `GET /api/recordings/v2/{id}/summary` | `transcriptionV2.tracks[].chunks[]` (полный транскрипт), `shortSummaryV2`, `protocolV2` (AI-протокол) | ✅ | ✅ |
+| `GET /api/recordings/{id}/transcript` | Транскрипт с word-level таймингами | ✅ | ✅ |
+| `GET /api/recordings/{id}/transcript/file` | Транскрипт готовым текстом | ✅ | ✅ |
+| `GET /api/recordings/{id}/summary/file` | AI-протокол встречи готовым текстом | ✅ | ✅ |
+| `GET /api/conferenceshistory/v2/{conferenceKey}` | Chat-сообщения встречи, участники | ✅ | ✅ |
+| `GET /recording-blob/{id}/{quality}` | MP4 видеопоток (с Range-поддержкой) | ✅ | ✅ |
+| `GET /api/conferenceshistory?top=` | Личная история встреч | ❌ 401 | ✅ |
+| `GET /api/rooms/{roomName}/recordings` | Записи комнаты | ❌ 401 | ✅ |
+| `GET /api/calendar?start=&end=` | События календаря (окно ≤ 7 дней) | ❌ 401 | ✅ |
+
+Ключу API закрыты **персональные** ресурсы (моя история, мой календарь): у ключа нет
+владельца, поэтому «мои» для него не определено — вместо них доменный листинг
+`/api/domain/recordings`. Грабли листинга: id записи в поле `key` (`id` всегда `null`);
+из фильтров серверный только `query` (подстрока названия), остальное — по полям ответа;
+`title` — название записи (комнаты), а не тема конференции.
+
+Заголовок auth: `X-Auth-Token: <ключ API>` либо `Authorization: Session <sessionToken>`
+(+ `x-platform: web`) — скрипты подставляют его сами, см. `ktalk-auth.sh`.
 
 > **Если SpeechCore (отдельный сервис транскриптов на `speechcore.kontur.host`) понадобится напрямую** — он требует отдельной аутентификации через SRS.Frontend.SpeechCore OIDC client. Обходить через `/api/recordings/v2/{id}/summary` — там всё уже доступно с тем же ktalk session token.
 
@@ -411,8 +453,10 @@ ffmpeg -y -i input.png -vf "drawbox=x=X:y=Y:w=W:h=H:color=black:t=fill" -update 
 
 - **`extract-frame.sh <video> <HH:MM:SS> <output.png>`** — один кадр через `ffmpeg -ss ... -frames:v 1`. Без аудио, качество `-q:v 2`.
 - **`extract-gif.sh <video> <HH:MM:SS> <duration_sec> <output.gif>`** — короткий GIF, 1280×720, FPS=10, оптимизация через двухпроходный palette filter.
-- **`kontur-talk-transcript.sh <recording_url>`** — забор транскрипта из Контур.Толк API. Читает `KTALK_SESSION_TOKEN` из env (значение cookie `sessionToken` из Chrome). Возвращает транскрипт `HH:MM:SS<TAB>Имя<TAB>Текст` в stdout + метаданные JSON в stderr. Эндпоинты верифицированы 2026-05-12 на реальном ktalk-tenant'е, должны работать на любом `*.ktalk.ru`.
-- **`kontur-talk-video.sh <recording_url> <output.mp4> [quality]`** — скачивает MP4 видеозаписи. По умолчанию highest quality (обычно 900p). Использует тот же `KTALK_SESSION_TOKEN`.
+- **`ktalk-auth.sh`** — не запускается сам, его `source`-ят остальные `kontur-talk-*.sh`. Общая авторизация каскадом: `KTALK_TOKEN` (ключ API, `X-Auth-Token`) → при HTTP 401/403 `KTALK_SESSION_TOKEN` (cookie), с предупреждением в stderr. `.env` грузится общим `hub_load_env`; значения из окружения приоритетнее. `ktalk_fetch <url> <out> [curl-args…]` печатает «`<код> <режим>`» — разбирай через `read -r status mode <<<"$(…)"`, из subshell переменную не вернуть. Внутри `ktalk_init_auth` есть явный `return 0`: иначе статус последней проверки `[ -n … ]` становится статусом функции и `set -e` в вызывающем скрипте убивает его, когда одного из токенов нет.
+- **`kontur-talk-find-recording.sh --tenant <host> [--date YYYY-MM-DD] [--room <roomName>] [--email <email>] [<title_regex>]`** — ищет ссылку на запись, когда URL неизвестен. По ключу API — доменный листинг `/api/domain/recordings` с пагинацией и ранним выходом (сортировка новые→старые); по cookie — личная история встреч. Вывод: `<дата>\t<title>\t<recording_url>\t<duration>s`, exit 3 — не найдено. `--room`/`--email` работают только в режиме ключа.
+- **`kontur-talk-transcript.sh <recording_url>`** — забор транскрипта из Контур.Толк API (авторизация каскадом, см. `ktalk-auth.sh`). Возвращает транскрипт `HH:MM:SS<TAB>Имя<TAB>Текст` в stdout + метаданные JSON в stderr. Эндпоинты верифицированы 2026-05-12 на реальном ktalk-tenant'е (работа по ключу API — 2026-07-28), должны работать на любом `*.ktalk.ru`.
+- **`kontur-talk-video.sh <recording_url> <output.mp4> [quality]`** — скачивает MP4 видеозаписи. По умолчанию highest quality (обычно 900p). Та же авторизация каскадом.
 
 ## Что НЕ делать
 

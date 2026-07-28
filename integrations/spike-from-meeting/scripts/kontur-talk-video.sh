@@ -3,9 +3,11 @@
 # Usage: kontur-talk-video.sh <recording_url> <output.mp4> [quality]
 #   quality: highest (default), 900p, 240p и т.д.
 #
-# Авторизация: $KTALK_SESSION_TOKEN env var (см. kontur-talk-transcript.sh)
+# Авторизация — каскадом через ktalk-auth.sh: ключ API ($KTALK_TOKEN), при отказе —
+# cookie-сессия ($KTALK_SESSION_TOKEN). См. kontur-talk-transcript.sh.
 # Эндпоинт: GET /recording-blob/{id}/{quality}
-# Верифицирован 2026-05-12 на реальном ktalk-tenant'е; работает на любом *.ktalk.ru.
+# Верифицирован 2026-05-12 на реальном ktalk-tenant'е (по ключу API — 2026-07-28);
+# работает на любом *.ktalk.ru.
 
 set -euo pipefail
 
@@ -21,24 +23,27 @@ else
   exit 1
 fi
 
-SESSION="${KTALK_SESSION_TOKEN:?KTALK_SESSION_TOKEN env var required}"
+# shellcheck source=ktalk-auth.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ktalk-auth.sh"
+ktalk_init_auth
+ktalk_have_auth || { ktalk_auth_help "$TENANT_HOST"; exit 2; }
 
 # Если quality=highest — разрешить через метаданные
 if [[ "$QUALITY" == "highest" ]]; then
-  QUALITY=$(curl -sS \
-    -H "Authorization: Session ${SESSION}" \
-    -H "x-platform: web" \
-    "https://${TENANT_HOST}/api/recordings/${RECORDING_ID}" \
-    | jq -r '.qualities[-1].name // "900p"')
+  META=$(mktemp -t ktalk-meta-XXXXXX)
+  trap 'rm -f "$META"' EXIT
+  ktalk_fetch "https://${TENANT_HOST}/api/recordings/${RECORDING_ID}" "$META" >/dev/null
+  QUALITY=$(jq -r '.qualities[-1].name // "900p"' "$META")
 fi
 
 URL="https://${TENANT_HOST}/recording-blob/${RECORDING_ID}/${QUALITY}"
 
 echo "Downloading $URL → $OUTPUT" >&2
-curl -sS -L -o "$OUTPUT" \
-  -H "Authorization: Session ${SESSION}" \
-  -H "Cookie: sessionToken=${SESSION}" \
-  "$URL"
+read -r STATUS AUTH_MODE <<<"$(ktalk_fetch "$URL" "$OUTPUT" -L)"
+if [[ "$STATUS" != "200" && "$STATUS" != "206" ]]; then
+  echo "Error: HTTP $STATUS при скачивании (auth: ${AUTH_MODE})" >&2
+  exit 1
+fi
 
 if [[ ! -s "$OUTPUT" ]]; then
   echo "Error: downloaded file is empty" >&2

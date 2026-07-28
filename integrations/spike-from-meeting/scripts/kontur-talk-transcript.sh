@@ -4,12 +4,13 @@
 #   <recording_url> — полный URL вида https://<tenant>.ktalk.ru/recordings/<id>
 #                     или https://talk.kontur.ru/recordings/<id>
 #
-# Источник auth (cookies из браузера, в порядке убывания приоритета):
-#   1. $KTALK_SESSION_TOKEN env var (если ты явно выставил)
-#   2. Cookie `sessionToken` из Chrome для домена tenant'a
+# Авторизация — каскадом через ktalk-auth.sh: сначала ключ API ($KTALK_TOKEN, заголовок
+# `X-Auth-Token`, не истекает), при его отказе — cookie-сессия ($KTALK_SESSION_TOKEN).
+# Оба токена подхватываются из .env, если их нет в окружении.
 #
 # Tenant и API_BASE определяются АВТОМАТИЧЕСКИ из URL. Эндпоинты верифицированы
-# 2026-05-12 на реальном ktalk-tenant'е; должны работать на любом *.ktalk.ru.
+# 2026-05-12 на реальном ktalk-tenant'е (работа по ключу API — 2026-07-28);
+# должны работать на любом *.ktalk.ru.
 #
 # Возвращает: транскрипт в формате `HH:MM:SS<TAB>Имя<TAB>Текст` на stdout
 #             + JSON-метаданные в stderr (title, duration, video_url, participants_count)
@@ -34,44 +35,23 @@ fi
 
 API_BASE="https://${TENANT_HOST}/api"
 
-# --- Шаг 2: получить session token ---
+# --- Шаг 2: авторизация (ключ API → фоллбек на cookie) ---
 
-SESSION="${KTALK_SESSION_TOKEN:-}"
-
-if [[ -z "$SESSION" ]]; then
-  # Попробовать прочитать из Chrome cookies (macOS).
-  # NB: Chrome шифрует cookies; нужен либо chromium-cookies tool, либо чтение из
-  # активной DevTools-сессии. Простейший fallback — попросить пользователя.
-  cat >&2 <<EOF
-Error: KTALK_SESSION_TOKEN not set and no Chrome cookie reader configured.
-
-Как получить токен:
-  1. Залогинься в браузере на ${TENANT_HOST} (через Google SSO)
-  2. Открой DevTools → Application → Cookies → ${TENANT_HOST}
-  3. Скопируй значение cookie 'sessionToken'
-  4. export KTALK_SESSION_TOKEN="<значение>"
-  5. Запусти скрипт повторно.
-
-Альтернатива — забрать через chrome-devtools MCP (для агентов в Claude Code):
-  mcp__chrome-devtools__navigate_page → URL записи (Google SSO пропустит автоматом)
-  mcp__chrome-devtools__evaluate_script → 'document.cookie' → распарсить sessionToken
-EOF
-  exit 2
-fi
+# shellcheck source=ktalk-auth.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ktalk-auth.sh"
+ktalk_init_auth
+ktalk_have_auth || { ktalk_auth_help "$TENANT_HOST"; exit 2; }
 
 # --- Шаг 3: вызвать /api/recordings/v2/{id}/summary (содержит transcriptionV2) ---
 
 TMPFILE=$(mktemp -t ktalk-summary-XXXXXX)
 trap 'rm -f "$TMPFILE"' EXIT
 
-HTTP_STATUS=$(curl -sS -o "$TMPFILE" -w "%{http_code}" \
-  -H "Authorization: Session ${SESSION}" \
-  -H "x-platform: web" \
-  -H "Accept: application/json" \
-  "${API_BASE}/recordings/v2/${RECORDING_ID}/summary" || echo "000")
+read -r HTTP_STATUS AUTH_MODE <<<"$(ktalk_fetch "${API_BASE}/recordings/v2/${RECORDING_ID}/summary" "$TMPFILE" \
+  -H "Accept: application/json")"
 
 if [[ "$HTTP_STATUS" != "200" ]]; then
-  echo "Error: HTTP $HTTP_STATUS from ${API_BASE}/recordings/v2/${RECORDING_ID}/summary" >&2
+  echo "Error: HTTP $HTTP_STATUS from ${API_BASE}/recordings/v2/${RECORDING_ID}/summary (auth: ${AUTH_MODE})" >&2
   echo "Body: $(head -c 500 "$TMPFILE")" >&2
   exit 1
 fi
@@ -79,10 +59,7 @@ fi
 # Параллельно тянем метаданные (title, duration, qualities)
 META_FILE=$(mktemp -t ktalk-meta-XXXXXX)
 trap 'rm -f "$TMPFILE" "$META_FILE"' EXIT
-curl -sS -o "$META_FILE" \
-  -H "Authorization: Session ${SESSION}" \
-  -H "x-platform: web" \
-  "${API_BASE}/recordings/${RECORDING_ID}" || true
+ktalk_fetch "${API_BASE}/recordings/${RECORDING_ID}" "$META_FILE" >/dev/null || true
 
 # --- Шаг 4: распарсить transcriptionV2 и вывести в плоском формате ---
 
