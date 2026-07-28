@@ -138,8 +138,11 @@ bash $DIR/buildin-pages.sh append-blocks <id|url> "$(cat /tmp/blocks.json)"
 | `**bold**` `*italic*` `` `code` `` `[t](url)` | inline-форматирование | — |
 
 Опция `--shift-headings` сдвигает уровни заголовков на 1 (`##` → level 1), если
-нужны более крупные секции. Изображения и цвета текста не поддерживаются
-(требуют upload в S3 / отсутствуют в синтаксисе Markdown).
+нужны более крупные секции. Изображения и цвета текста в Markdown-конвертере не
+поддерживаются (отсутствуют в синтаксисе Markdown); картинку на страницу добавляет
+отдельная команда `buildin-pages.sh append-image <page> <file> [caption]` — она
+сама грузит файл в S3 Buildin (`getS3FileUploadInfo` → presigned PUT) и создаёт
+image-блок (`type: 14`, `data.ossName`).
 
 `read` понимает эти типы в обратную сторону — таблицы, `<!-- collapse -->` и
 вложенность восстанавливаются при чтении страницы как Markdown.

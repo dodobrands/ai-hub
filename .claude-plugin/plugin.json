@@ -1,6 +1,6 @@
 {
   "name": "ai-hub",
-  "version": "1.14.4",
+  "version": "1.14.5",
   "description": "AI skills and integrations with Kaiten, Time, Buildin, Genie, Holst, Kusto, TestOps + automation workflows (spike research, product discovery, testing, code review)",
   "author": {
     "name": "sagos95"
