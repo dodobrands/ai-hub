@@ -169,10 +169,22 @@ GET /cards?board_id=123&offset=100&limit=100
 ```json
 POST /cards/{card_id}/members
 {
-  "user_id": 123,
-  "type": 1  // 1 - member (участник), 2 - responsible (ответственный)
+  "user_id": 123
 }
 ```
+
+> **⚠️ Роль задаётся отдельным PATCH, а не при создании.** `POST /members` создаёт членство и
+> **игнорирует** переданный `type` — пользователь всегда добавляется как `type 1` (обычный
+> участник). Чтобы сделать его **ответственным** (`type 2` — именно он попадает в фильтр
+> `responsible_ids`), после POST вызови PATCH:
+>
+> ```json
+> PATCH /cards/{card_id}/members/{user_id}
+> { "type": 2 }  // 1 - участник, 2 - ответственный
+> ```
+>
+> Понижение ниже 2 через PATCH API отклоняет (`Member.type should be >= 2`). Готовая
+> идемпотентная обёртка — `kaiten-cards.sh assign <card_id> <user_id>` (POST + PATCH type 2).
 
 ---
 
