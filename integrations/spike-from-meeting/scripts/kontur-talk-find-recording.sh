@@ -133,18 +133,39 @@ find_via_session() {
   local found=0 keys_titles
 
   [[ -n "$TITLE_RE" ]] || {
-    echo "Error: режим cookie-сессии ищет только по <title_regex> (--room/--email не поддержаны)" >&2
+    echo "Error: режим cookie-сессии ищет только по <title_regex>: --room/--email умеет лишь ключ API." >&2
+    echo "Передай регэксп по теме встречи либо задай KTALK_TOKEN." >&2
     return 1
   }
 
+  # NB: HTTP-код проверяем явно. На `set -e` здесь полагаться нельзя — функция вызывается
+  # через `|| rc=$?`, а внутри такого вызова errexit не действует: провал curl молча
+  # превратился бы в «встреч не найдено» (exit 3) вместо ошибки авторизации.
+  local sess_tmp sess_status rc
+  sess_tmp=$(mktemp -t ktalk-session-XXXXXX)
+
   session_get() {
-    curl -sS --fail \
+    sess_status=$(curl -sS -o "$sess_tmp" -w '%{http_code}' \
       -H "Authorization: Session ${KTALK_SESSION_TOKEN}" \
       -H "Cookie: sessionToken=${KTALK_SESSION_TOKEN}" \
-      -H "x-platform: web" -H "Accept: application/json" "$1"
+      -H "x-platform: web" -H "Accept: application/json" "$1" || echo "000")
+    case "$sess_status" in
+      200) cat "$sess_tmp"; return 0 ;;
+      401|403)
+        echo "Error: cookie-сессия не принята (HTTP $sess_status) — sessionToken протух." >&2
+        echo "Обнови cookie или задай KTALK_TOKEN (ключ API не истекает)." >&2
+        return 2 ;;
+      *)
+        echo "Error: HTTP $sess_status от ${1}" >&2
+        echo "Body: $(head -c 200 "$sess_tmp")" >&2
+        return 1 ;;
+    esac
   }
 
-  keys_titles=$(session_get "${API_BASE}/conferenceshistory?top=50&includeUnfinished=true" \
+  keys_titles=$(session_get "${API_BASE}/conferenceshistory?top=50&includeUnfinished=true") || {
+    rc=$?; rm -f "$sess_tmp"; return "$rc"
+  }
+  keys_titles=$(printf '%s' "$keys_titles" \
     | jq -r --arg day "$DAY" --arg re "$TITLE_RE" '
         .conferences[]
         | select(.title != null)
@@ -153,6 +174,7 @@ find_via_session() {
         | [.key, .startTime, .title] | @tsv')
 
   if [[ -z "$keys_titles" ]]; then
+    rm -f "$sess_tmp"
     echo "No meetings matching /${TITLE_RE}/i on ${DAY} (${TENANT_HOST})" >&2
     return 3
   fi
@@ -165,6 +187,8 @@ find_via_session() {
     done < <(session_get "${API_BASE}/conferenceshistory/v2/${key}" \
                | jq -r '.artifacts.recordings[]? | [.id, ((.duration // 0) | tostring)] | @tsv')
   done <<< "$keys_titles"
+
+  rm -f "$sess_tmp"
 
   if [[ "$found" -eq 0 ]]; then
     echo "Meetings matched on ${DAY}, but none has a recording yet (запись могла не завершиться или ещё обрабатывается)" >&2
