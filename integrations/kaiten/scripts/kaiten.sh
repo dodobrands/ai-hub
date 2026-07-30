@@ -73,6 +73,8 @@ is_card_archive_operation() {
 # - Checklist item removal: /cards/{id}/checklists/{id}/items/{id}
 # - Card blocker removal: /cards/{id}/blockers/{id}
 # - Member removal from cards: /cards/{id}/members/{member_id}
+# - Planned relation removal: /cards/{id}/planned-relation/{target_card_id}
+#   (снимает planned-зависимость между карточками — обратимо через re-relate, не удаляет карточки)
 is_safe_delete_operation() {
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/tags/[0-9]+$ ]]; then
         return 0
@@ -84,6 +86,9 @@ is_safe_delete_operation() {
         return 0
     fi
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/members/[0-9]+$ ]]; then
+        return 0
+    fi
+    if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/planned-relation/[0-9]+$ ]]; then
         return 0
     fi
     return 1

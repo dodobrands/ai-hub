@@ -100,6 +100,21 @@ chmod +x integrations/kaiten/scripts/*.sh
 (`blocker_card_id`). `blocker_id` для снятия берётся из вывода `blockers`. Низкоуровнево
 то же доступно через `kaiten.sh` (`GET/POST/DELETE /cards/<id>/blockers[/<blocker_id>]`).
 
+### Планируемые связи (порядок работ)
+
+```bash
+./kaiten-cards.sh relations <card_id>              # предшественники/последователи карточки
+./kaiten-cards.sh relate <pred_id> <succ_id>       # pred идёт ПЕРЕД succ (тип end-start)
+./kaiten-cards.sh relate <pred_id> <succ_id> <type> # явный тип связи
+./kaiten-cards.sh unrelate <pred_id> <succ_id>     # удалить связь pred -> succ
+```
+
+Планируемая связь (`planned-relation`, тип `end-start`) задаёт **порядок работ**: предшественник
+идёт перед последователем. Это мягкая зависимость таймлайна, а не жёсткий блок (для жёсткого —
+`block`). **У обеих карточек должны быть плановые даты** (`planned_start`/`planned_end`) — иначе
+Kaiten отклонит связь; проставь их через `update` (политику дат-заглушек держи в
+скриптах-потребителях). Подробнее — [docs/KAITEN_API.md](./docs/KAITEN_API.md#card-planned-relations-планируемые-связи).
+
 ## API Reference
 
 Полная документация endpoints — в [docs/KAITEN_API.md](./docs/KAITEN_API.md).

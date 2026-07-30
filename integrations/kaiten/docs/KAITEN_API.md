@@ -327,6 +327,58 @@ curl -X POST "https://{domain}/api/latest/cards/<parent_id>/children" \
 
 ---
 
+## Card Planned Relations (Планируемые связи)
+
+Планируемая связь задаёт **порядок работ** между карточками во времени (тип `end-start`:
+успех одной начинается после завершения другой) — в отличие от блокировок это мягкая
+зависимость таймлайна, а не жёсткий блок. Направление: `predecessor` (source) → `successor`
+(target): предшественник идёт **перед** последователем.
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| POST | `/cards/{predecessor_id}/planned-relation` | Создать связь predecessor → successor |
+| DELETE | `/cards/{predecessor_id}/planned-relation/{successor_id}` | Удалить связь |
+
+Чтение — связи встроены в объект карточки (`GET /cards/{id}`), отдельного GET-эндпоинта нет
+(`GET /cards/{id}/planned-relation` → `405`):
+
+- `plannedPredecessors[]` — карточки, идущие **перед** этой (для них эта карточка — `target`);
+- `plannedSuccessors[]` — карточки, идущие **после** (для них эта карточка — `source`).
+
+У элемента связи: `source_id` (предшественник), `target_id` (последователь), `type`.
+
+### Создание связи
+
+```json
+POST /cards/{predecessor_id}/planned-relation
+{
+  "target_card_id": <successor_id>,
+  "type": "end-start"
+}
+```
+
+> **⚠️ Обе карточки должны иметь `planned_start`/`planned_end`.** Kaiten требует заполненные
+> плановые даты у обеих связываемых карточек — иначе запрос вернёт ошибку. Проставь даты
+> заранее (`PATCH /cards/{id} {"planned_start": ..., "planned_end": ...}`). Конкретную политику
+> дат (например, дату-заглушку для карточек, заведённых впрок) держи в скриптах-потребителях,
+> а не в generic-клиенте.
+
+```bash
+# Пример: карточка <pred> должна идти перед <succ>
+curl -X POST "https://{domain}/api/latest/cards/<pred>/planned-relation" \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"target_card_id": <succ>, "type": "end-start"}'
+```
+
+Ответ создания: `200`. Ответ удаления: `200` с `{"card_id": <pred>, "target_card_id": <succ>}`.
+
+> **`403` при удалении** обычно означает, что связи `predecessor → successor` не существует
+> (например, `predecessor_id` не является source этой связи) — проверь направление и наличие
+> связи через `plannedPredecessors`/`plannedSuccessors`, а не формат запроса.
+
+---
+
 ## Card External Links (Внешние ссылки)
 
 | Метод | Endpoint | Описание |

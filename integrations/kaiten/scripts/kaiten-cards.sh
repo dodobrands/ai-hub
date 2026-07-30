@@ -44,6 +44,14 @@ Commands:
                                        - Заблокировать другой карточкой (зависимость)
   unblock <card_id> <blocker_id>     - Снять блокировку (blocker_id из blockers)
 
+  relations <card_id>                - Планируемые связи карточки (предшественники/последователи)
+  relate <predecessor_id> <successor_id> [type]
+                                       - Связать карточки: predecessor идёт ПЕРЕД successor
+                                         (planned-зависимость, type по умолчанию end-start).
+                                         У ОБЕИХ карточек должны быть planned_start/planned_end.
+  unrelate <predecessor_id> <successor_id>
+                                       - Удалить планируемую связь predecessor -> successor
+
   checklist <card_id> <name>         - Создать чек-лист
   checklists <card_id>               - Получить чек-листы
   check-item <card_id> <checklist_id> <text>  - Добавить пункт чек-листа
@@ -65,6 +73,9 @@ Examples:
   ./kaiten-cards.sh block 789 "Ждём макеты"
   ./kaiten-cards.sh block 789 --card 456
   ./kaiten-cards.sh unblock 789 12345
+  ./kaiten-cards.sh relations 789
+  ./kaiten-cards.sh relate 456 789        # 456 идёт перед 789
+  ./kaiten-cards.sh unrelate 456 789
 EOF
 }
 
@@ -226,6 +237,36 @@ case "${1:-help}" in
         [[ -z "$3" ]] && { echo "Usage: $0 unblock <card_id> <blocker_id>" >&2; exit 1; }
         [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: blocker_id must be numeric, got '$3'" >&2; exit 1; }
         kaiten DELETE "/cards/$2/blockers/$3"
+        ;;
+    relations)
+        # Планируемые связи (planned-зависимости, тип end-start) встроены в объект карточки:
+        # .plannedPredecessors — карточки, идущие ПЕРЕД этой; .plannedSuccessors — ПОСЛЕ.
+        # У элемента source_id = карточка-предшественник, target_id = карточка-последователь.
+        [[ -z "$2" ]] && { echo "Usage: $0 relations <card_id>" >&2; exit 1; }
+        kaiten GET "/cards/$2" | jq '{
+            plannedPredecessors: ((.plannedPredecessors // []) | map({source_id, target_id, type, title})),
+            plannedSuccessors:   ((.plannedSuccessors   // []) | map({source_id, target_id, type, title}))
+        }'
+        ;;
+    relate)
+        # Связать две карточки planned-зависимостью: predecessor идёт ПЕРЕД successor.
+        # POST /cards/{predecessor}/planned-relation {target_card_id: successor, type}.
+        # Kaiten требует у ОБЕИХ карточек planned_start/planned_end — иначе API вернёт ошибку
+        # (проставь даты через `update`; политику дат-заглушек держи в скиптах-потребителях).
+        [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 relate <predecessor_id> <successor_id> [type]" >&2; exit 1; }
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: predecessor_id must be numeric, got '$2'" >&2; exit 1; }
+        [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: successor_id must be numeric, got '$3'" >&2; exit 1; }
+        rel_type="${4:-end-start}"
+        json_body=$(jq -n --argjson target "$3" --arg type "$rel_type" '{target_card_id: $target, type: $type}')
+        kaiten POST "/cards/$2/planned-relation" "$json_body"
+        ;;
+    unrelate)
+        # Удалить planned-связь predecessor -> successor.
+        # DELETE /cards/{predecessor}/planned-relation/{successor}.
+        [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 unrelate <predecessor_id> <successor_id>" >&2; exit 1; }
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: predecessor_id must be numeric, got '$2'" >&2; exit 1; }
+        [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: successor_id must be numeric, got '$3'" >&2; exit 1; }
+        kaiten DELETE "/cards/$2/planned-relation/$3"
         ;;
     checklist)
         # Use jq for safe JSON escaping
