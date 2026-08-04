@@ -10,6 +10,13 @@
 #      (e.g. som-ai-hub/integrations/sagos95-ai-hub/...), the team-overlay's
 #      .env at the repo root takes precedence over any .env inside the
 #      subtree itself.
+#   3. If the walk found nothing, falls back to the user profile, in order:
+#        ${XDG_CONFIG_HOME:-~/.config}/ai-hub/.env
+#        ~/.ai-hub/.env
+#        ~/.claude/plugins/cache/ai-hub/.env   (where setup.sh writes it)
+#      Plugin installs live in sibling trees (~/.claude/plugins/cache/...
+#      vs ~/.claude/plugins/marketplaces/...), so a walk up from one never
+#      reaches the .env of the other.
 #
 # Usage:
 #   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,6 +78,22 @@ hub_load_env() {
         fi
         dir="$(dirname "$dir")"
     done
+
+    # Nothing up the tree — try the user profile. Keeps the repo/overlay .env
+    # authoritative when it exists, and makes a once-configured token work from
+    # any install layout (plugin cache, marketplace clone, bare shell) without
+    # depending on $CLAUDE_PLUGIN_ROOT being set.
+    if [[ ${#found[@]} -eq 0 ]]; then
+        local _c
+        for _c in "${XDG_CONFIG_HOME:-$HOME/.config}/ai-hub/.env" \
+                  "$HOME/.ai-hub/.env" \
+                  "$HOME/.claude/plugins/cache/ai-hub/.env"; do
+            if [[ -f "$_c" ]]; then
+                found=("$_c")
+                break
+            fi
+        done
+    fi
 
     if [[ ${#found[@]} -eq 0 ]]; then
         return 1
