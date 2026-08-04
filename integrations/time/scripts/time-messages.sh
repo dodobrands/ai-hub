@@ -16,8 +16,8 @@ fi
 # Best-effort load .env so optional defaults (e.g. $TIME_TEAM_ID for `search`) are available.
 # Non-fatal: explicit-arg forms work without it (auth itself is handled by the time.sh subprocess).
 _hub_load_env_sh="$SCRIPT_DIR/../../hub-meta/scripts/load-env.sh"
-[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
-[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
 [[ -f "$_hub_load_env_sh" ]] && { source "$_hub_load_env_sh"; hub_load_env "$SCRIPT_DIR"; }
 unset _hub_load_env_sh
 

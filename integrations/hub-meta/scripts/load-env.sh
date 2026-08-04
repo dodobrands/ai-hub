@@ -158,8 +158,11 @@ hub_resolve_plugin_path() {
     if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
         local marketplace_cache
         marketplace_cache="$(cd "$CLAUDE_PLUGIN_ROOT/../.." 2>/dev/null && pwd)" || return 1
+        # The cache keeps several plugin versions side by side. sort -V picks
+        # the highest one; head -1 would pick the lexicographically first
+        # (1.2.2 before 2.0.0), i.e. a stale copy of the file.
         local found
-        found=$(find "$marketplace_cache/$plugin" -maxdepth 4 -path "*/$rel" -type f 2>/dev/null | head -1)
+        found=$(find "$marketplace_cache/$plugin" -maxdepth 4 -path "*/$rel" -type f 2>/dev/null | sort -V | tail -1)
         if [[ -n "$found" ]]; then
             echo "$found"
             return 0

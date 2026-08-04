@@ -30,13 +30,14 @@ ktalk_init_auth() {
         script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         # Тот же бутстрап, что в остальных интеграциях: marketplace-раскладка
         # (<root>/integrations/<plugin>/scripts/) либо кэш плагинов Claude Code
-        # (<cache>/<marketplace>/<plugin>/<version>/scripts/ — версия hub-meta
-        # ищется глобом рядом, $CLAUDE_PLUGIN_ROOT остаётся крайним фолбэком).
+        # (<cache>/<marketplace>/<plugin>/<version>/scripts/ — версии hub-meta
+        # ищутся глобом рядом, берём старшую; $CLAUDE_PLUGIN_ROOT остаётся
+        # крайним фолбэком).
         _hub_load_env_sh="$script_dir/../../hub-meta/scripts/load-env.sh"
         # shellcheck disable=SC2012  # тот же однострочник, что в остальных интеграциях (kusto.sh)
-        [ -f "$_hub_load_env_sh" ] || _hub_load_env_sh=$(ls "$script_dir"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
+        [ -f "$_hub_load_env_sh" ] || _hub_load_env_sh=$(ls "$script_dir"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
         # shellcheck disable=SC2012
-        [ -f "$_hub_load_env_sh" ] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
+        [ -f "$_hub_load_env_sh" ] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
         if [ -f "$_hub_load_env_sh" ]; then
             # shellcheck source=../../hub-meta/scripts/load-env.sh
             . "$_hub_load_env_sh"

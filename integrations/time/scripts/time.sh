@@ -15,10 +15,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source hub-meta/scripts/load-env.sh from either marketplace layout
 # (<root>/integrations/<plugin>/scripts/) or Claude Code plugin cache
 # (<cache>/<marketplace>/<plugin>/<version>/scripts/, resolved by globbing the
-# sibling hub-meta version, with $CLAUDE_PLUGIN_ROOT as a last resort).
+# sibling hub-meta versions and taking the highest, with $CLAUDE_PLUGIN_ROOT
+# as a last resort).
 _hub_load_env_sh="$SCRIPT_DIR/../../hub-meta/scripts/load-env.sh"
-[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
-[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
 [[ -f "$_hub_load_env_sh" ]] || { echo "Error: hub-meta/scripts/load-env.sh not found (marketplace and plugin-cache layouts checked)" >&2; exit 1; }
 # shellcheck source=../../hub-meta/scripts/load-env.sh
 source "$_hub_load_env_sh"

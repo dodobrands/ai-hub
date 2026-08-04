@@ -104,9 +104,15 @@ echo "== Резолв load-env.sh (кеш плагинов, CLAUDE_PLUGIN_ROOT �
 { echo; echo "### Резолв load-env.sh — кеш плагинов без CLAUDE_PLUGIN_ROOT"; echo; echo "| Скрипт | Итог |"; echo "|---|---|"; } >> "$SUM"
 
 # Кеш-раскладка: <cache>/<marketplace>/<plugin>/<version>/scripts/
+# Версий hub-meta рядом несколько (кеш их копит) — резолв обязан взять старшую.
+# Набор подобран так, что лексикографический порядок ≠ версионный: `head -1`
+# выбрал бы 1.2.2, а нужна 2.0.0.
 CACHE="$TMP/bootstrap/cache/ai-hub"
-mkdir -p "$CACHE/hub-meta/1.2.1/scripts"
-cp "$LOAD_ENV" "$CACHE/hub-meta/1.2.1/scripts/load-env.sh"
+EXPECTED_HUB_META="$CACHE/hub-meta/2.0.0/scripts/load-env.sh"
+for v in 1.2.2 1.10.0 2.0.0; do
+  mkdir -p "$CACHE/hub-meta/$v/scripts"
+  cp "$LOAD_ENV" "$CACHE/hub-meta/$v/scripts/load-env.sh"
+done
 
 for f in $(grep -rl '^_hub_load_env_sh="\$SCRIPT_DIR/\.\./\.\./hub-meta/scripts/load-env\.sh"' "$REPO/integrations" | sort); do
   rel="${f#"$REPO"/}"
@@ -119,10 +125,12 @@ for f in $(grep -rl '^_hub_load_env_sh="\$SCRIPT_DIR/\.\./\.\./hub-meta/scripts/
   got="$( CLAUDE_PLUGIN_ROOT="" bash -c "set -e; unset CLAUDE_PLUGIN_ROOT; SCRIPT_DIR='$scripts_dir'
 $snip
 printf %s \"\$_hub_load_env_sh\"" 2>/dev/null )"
-  if [ -n "$got" ] && [ -f "$got" ]; then
-    pass "$rel"; r=PASS
+  if [ ! -f "$got" ]; then
+    fail "$rel — load-env.sh не найден → [$got]"; r=FAIL
+  elif [ "$(cd "$(dirname "$got")" && pwd)/load-env.sh" != "$EXPECTED_HUB_META" ]; then
+    fail "$rel — взята не старшая версия → [$got]"; r=FAIL
   else
-    fail "$rel → [$got]"; r=FAIL
+    pass "$rel"; r=PASS
   fi
   echo "| $rel | $r |" >> "$SUM"
 done
