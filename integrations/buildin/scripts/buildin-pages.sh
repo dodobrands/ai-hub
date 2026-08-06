@@ -672,11 +672,15 @@ print(json.dumps({
         # Дедуп как в родном клиенте: перед аплоадом ищем файл по sha256+size и
         # переиспользуем существующий ossName. Проверка оппортунистическая — в наших
         # пробах ответ был пуст даже для заведомых дублей; пусто -> грузим как обычно.
-        S3_KEY=$(buildin POST "/api/search/resource" "$(python3 -c "
+        # Тело запроса — отдельной подстановкой: вложенное $(…"$(python3 -c "…{…}")"…)
+        # на bash 3.2 теряет кавычки внутреннего скрипта, brace expansion режет
+        # словарь и тело уходит пустым (SyntaxError + HTTP 411).
+        DEDUP_BODY=$(python3 -c "
 import json, sys
 meta = json.loads(sys.argv[1])
 print(json.dumps({'spaceId': sys.argv[2], 'sha256': meta['sha256'], 'size': meta['size']}))
-" "$META" "$SPACE_ID")" | python3 -c "import sys, json; print((json.load(sys.stdin).get('data') or {}).get('ossName') or '')" 2>/dev/null) || S3_KEY=""
+" "$META" "$SPACE_ID")
+        S3_KEY=$(buildin POST "/api/search/resource" "$DEDUP_BODY" | python3 -c "import sys, json; print((json.load(sys.stdin).get('data') or {}).get('ossName') or '')" 2>/dev/null) || S3_KEY=""
 
         if [[ -z "$S3_KEY" ]]; then
             UPLOAD_BODY=$(python3 -c "
