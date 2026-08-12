@@ -17,7 +17,11 @@ Usage:
 - -, * списки (вложенность по отступу) → bulleted (4) + children
 - 1. 2. нумерованные списки            → numbered (5)
 - - [ ] / - [x]                        → todo (3)
+- отступ без маркера внутри списка     → продолжение пункта (мягкий перенос),
+                                          клеится к его тексту через пробел
 - > выноска                            → callout (13); ведущий эмодзи → иконка
+                                          каждая строка `>` — отдельная строка
+                                          внутри выноски (не склеивается)
 - ---                                  → divider (9)
 - ``` код ```                          → code (25); ```mermaid → preview-диаграмма
 - | таблица |                          → native table (27 + строки 28)
@@ -122,7 +126,7 @@ def parse_list(lines, start):
     Возвращает (список блоков верхнего уровня с children, next_index).
     Вложенность строится по ширине отступа.
     """
-    items = []  # (indent_level, block)
+    items = []  # (indent_level, block, raw_text)
     i = start
     while i < len(lines):
         line = lines[i]
@@ -138,19 +142,38 @@ def parse_list(lines, start):
         if mt:
             indent = len(mt.group(1).replace("\t", "  ")) // 2
             checked = mt.group(2).lower() == "x"
-            block = {"type": 3, "data": {"segments": parse_inline(mt.group(3)), "checked": checked}}
+            raw = mt.group(3)
+            block = {"type": 3, "data": {"segments": parse_inline(raw), "checked": checked}}
         elif ml:
             indent = len(ml.group(1).replace("\t", "  ")) // 2
-            block = list_item_block(ml.group(2), ml.group(3))
+            raw = ml.group(3)
+            block = list_item_block(ml.group(2), raw)
+        elif items and line[:1].isspace() and not _starts_block(line):
+            # Продолжение пункта по отступу: мягко перенесённый хвост — строка с
+            # отступом и без маркера. Клеим к тексту пункта через пробел и заново
+            # разбираем inline, чтобы разметка через перенос строки не ломалась.
+            #
+            # Границы намеренные: истинное lazy continuation по CommonMark (хвост
+            # БЕЗ отступа) здесь не поддержано — такая строка по-прежнему уходит в
+            # отдельный параграф. Строка с отступом ≥4 позиций от начала контента
+            # по CommonMark была бы indented code block внутри пункта, но их этот
+            # конвертер не умеет в принципе (только fenced), поэтому она тоже
+            # приклеится как текст.
+            indent, block, raw = items[-1]
+            raw = raw.rstrip() + " " + line.strip()
+            block["data"]["segments"] = parse_inline(raw)
+            items[-1] = (indent, block, raw)
+            i += 1
+            continue
         else:
             break
-        items.append((indent, block))
+        items.append((indent, block, raw))
         i += 1
 
     # Свернуть плоский (indent, block) в дерево по отступам
     roots = []
     stack = []  # (indent, block)
-    for indent, block in items:
+    for indent, block, _ in items:
         while stack and stack[-1][0] >= indent:
             stack.pop()
         if stack:
