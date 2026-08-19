@@ -14,6 +14,9 @@
 #        ${XDG_CONFIG_HOME:-~/.config}/ai-hub/.env
 #        ~/.ai-hub/.env
 #        ~/.claude/plugins/cache/ai-hub/.env   (where setup.sh writes it)
+#        ~/.claude/plugins/.env                 (where the walk-up from a plugin-cache
+#                                               script lands — lets a standalone clone
+#                                               share the plugin install's .env)
 #      Plugin installs live in sibling trees (~/.claude/plugins/cache/...
 #      vs ~/.claude/plugins/marketplaces/...), so a walk up from one never
 #      reaches the .env of the other.
@@ -87,7 +90,8 @@ hub_load_env() {
         local _c
         for _c in "${XDG_CONFIG_HOME:-$HOME/.config}/ai-hub/.env" \
                   "$HOME/.ai-hub/.env" \
-                  "$HOME/.claude/plugins/cache/ai-hub/.env"; do
+                  "$HOME/.claude/plugins/cache/ai-hub/.env" \
+                  "$HOME/.claude/plugins/.env"; do
             if [[ -f "$_c" ]]; then
                 found=("$_c")
                 break

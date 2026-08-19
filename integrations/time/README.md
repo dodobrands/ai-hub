@@ -9,18 +9,26 @@ integrations/time/
 ├── .cache/                        # Локальный кэш каналов и storage-state (gitignored)
 ├── .time-signature                # Подпись сообщений (gitignored)
 ├── .claude-plugin/plugin.json
+├── .mcp.json                      # MCP-сервер time-connector (Claude Code Channel) для plugin-раскладки
 ├── README.md
 ├── commands/
 │   ├── time-chat.md              # /ai-hub:time-chat — каналы/сообщения
-│   └── time-login.md             # /ai-hub:time-login — автологин через браузерный MCP
-└── scripts/
-    ├── time.sh                   # HTTP-клиент, dual auth (Layer 1)
-    ├── time-login.sh             # Интерактивный логин (терминал, fallback) + check
-    ├── time-extract-token-from-storage.sh  # Извлечение токена из storage-state (Playwright MCP)
-    ├── time-save-token-from-clipboard.sh   # Сохранение из clipboard (DevTools MCP)
-    ├── time-channels.sh          # Каналы (Layer 2)
-    ├── time-messages.sh          # Сообщения (Layer 2)
-    └── time-helpers.sh           # Shared helpers: permalink parsing, batch user resolve
+│   ├── time-login.md             # /ai-hub:time-login — автологин через браузерный MCP
+│   └── time-connector.md         # /ai-hub:time-connector — проверка и запуск коннектора
+├── connector/                     # Claude Code Channel connector (TypeScript, bun / node ≥ 22.6)
+│   ├── server.ts                 # MCP stdio server: inbound → <channel>, tools reply/react, permission relay
+│   ├── src/                      # config, whitelist, classify, chunk, mattermost (REST+WS), instructions
+│   └── test/                     # node:test юниты + bun-only e2e с фейковым Mattermost
+├── scripts/
+│   ├── time.sh                   # HTTP-клиент, dual auth (Layer 1)
+│   ├── time-login.sh             # Интерактивный логин (терминал, fallback) + check
+│   ├── time-extract-token-from-storage.sh  # Извлечение токена из storage-state (Playwright MCP)
+│   ├── time-save-token-from-clipboard.sh   # Сохранение из clipboard (DevTools MCP)
+│   ├── time-channels.sh          # Каналы (Layer 2)
+│   ├── time-messages.sh          # Сообщения (Layer 2)
+│   ├── time-helpers.sh           # Shared helpers: permalink parsing, batch user resolve
+│   └── time-connector.sh         # Лаунчер коннектора: .env → team-config → bun/node → server.ts
+└── tests/                         # bats: extract_post_id, лаунчер коннектора
 ```
 
 ## Быстрый старт
@@ -216,6 +224,143 @@ echo ' 🤖 sent via AI Hub' > integrations/time/.time-signature
 1. Есть `TIME_BOT_TOKEN` → бот
 2. Есть `TIME_TOKEN` → личный
 3. Ничего нет → подсказка запустить `/ai-hub:time-login`
+
+## Connector — интерактивный бот в Time (Claude Code Channels)
+
+Опциональная надстройка над клиентом: коллеги пишут боту в Time, а отвечает им **твоя запущенная
+сессия Claude Code**. Неинтерактивные скрипты выше работают независимо и не меняются.
+
+Основано на **Claude Code Channels** (research preview): `connector/server.ts` — MCP-сервер, который
+держит WebSocket к Time и пушит входящие в сессию как `<channel …>`; Claude отвечает MCP-тулом
+`reply`. Работает только пока сессия открыта; ответы уходят от имени бота.
+
+### Что доставляется в сессию
+
+| Вид (`kind`) | Когда | Куда уходит ответ |
+|---|---|---|
+| `dm` | личное сообщение боту | в ту же ЛС, плоским сообщением (тред — только если собеседник сам пишет в треде) |
+| `mention` | `@имя-бота` в канале, где бот состоит | reply под сообщением-триггером (тред) |
+| `thread` | ответ в треде, корень которого написал бот, или в котором бот уже отвечал в этой сессии | в тот же тред |
+
+Всё остальное (посты в каналах без упоминания, system-посты, собственные посты бота) игнорируется.
+
+### Требования
+
+- Claude Code с авторизацией Anthropic (claude.ai / Console API key; Bedrock/Foundry не поддерживают Channels).
+  Для Team/Enterprise админ должен включить Channels (`channelsEnabled`).
+- `bun` (предпочтительно) или Node.js ≥ 22.6.
+- В `.env`: `TIME_BASE_URL` и **`TIME_BOT_TOKEN`** (токен бот-аккаунта; личный `TIME_TOKEN` не подходит).
+
+### Токен бота и права
+
+Коннектору нужен **Bot Account** Time: Menu → Integrations → Bot Accounts → Add Bot Account.
+Если у тебя нет прав создавать ботов — запроси токен у администратора Time в своей компании.
+Боту нужны права на сообщения:
+
+- при создании — галочка **«Post to channels»** (`post:all`), иначе `reply` будет получать `403`;
+- бот **видит посты канала только если добавлен в канал** — `/invite @имя-бота` в нужных каналах
+  (иначе @упоминания до коннектора не дойдут); ЛС работают без приглашений;
+- реакции (`react`) — обычные права участника.
+
+Токен кладётся в `.env` из терминала, не через чат:
+```bash
+bash integrations/hub-meta/scripts/env-manager.sh set TIME_BOT_TOKEN <token>
+```
+
+### Whitelist
+
+Отвечать боту могут только пользователи из whitelist — **для всех видов входящих** (ЛС,
+@упоминания, треды). Остальные молча дропаются (строка `drop: …` в stderr сервера / debug-логе
+Claude Code). Пустой whitelist = дропается всё (сервер предупредит при старте).
+
+Приоритет источников:
+1. `team-config.json` → `time.connector.allowed_users: ["j.doe", "a.smith"]` (overlay-конфиг команды);
+2. `.env` → `TIME_CONNECTOR_ALLOWED_USERS=j.doe,a.smith`.
+
+Username'ы резолвятся в id при старте и раз в 10 минут; нераспознанные попадут в warning.
+
+### Запуск
+
+Канал подключается **флагом при старте `claude`**, из запущенной сессии его включить нельзя.
+`/ai-hub:time-connector` проверяет предпосылки (`print-env`, `check`) и печатает нужную команду.
+
+Проверка без MCP:
+```bash
+bash integrations/time/scripts/time-connector.sh check
+```
+
+Варианты запуска:
+
+| Раскладка | Команда |
+|---|---|
+| Плагин из marketplace (`/plugin install time@ai-hub`) | `claude --dangerously-load-development-channels plugin:time@ai-hub` |
+| Клон / overlay-репо | `claude mcp add --scope user time-connector -- bash "$PWD/integrations/time/scripts/time-connector.sh" serve`, затем `claude --dangerously-load-development-channels server:time-connector` |
+| Проектный `.mcp.json` overlay-репо | добавь сервер `time-connector` с `command: bash`, `args: ["integrations/time/scripts/time-connector.sh", "serve"]` и запускай `… server:time-connector` |
+
+`--channels plugin:time@ai-hub` (без `dangerously`) заработает, когда админ организации добавит
+ai-hub в `allowedChannelPlugins`. При старте с dev-флагом Claude Code показывает предупреждение —
+это ожидаемо. Проверка: `/mcp` → `time-connector` connected, тулы `reply`, `react`.
+
+Зависимости `connector/node_modules` ставятся автоматически при первом запуске (`bun install` /
+`npm install`, вывод уходит в stderr).
+
+### Как это выглядит в сессии
+
+```
+<channel source="…time-connector" kind="mention" post_id="…" channel_id="…" root_id="…"
+         user="j.doe" user_id="…" team="your-team" channel="dev" permalink="https://…/pl/…" ts="…">
+@claude-bot что с релизом?
+</channel>
+```
+
+Claude отвечает `reply(channel_id, text, root_id)` — `root_id` берётся из тега (пустой = плоское
+сообщение в ЛС). Длинные ответы режутся на несколько постов в том же треде. `react(post_id, emoji)` —
+для коротких ack. Перед доставкой коннектор шлёт typing-индикатор и ставит реакцию `eyes`
+(отключается `TIME_CONNECTOR_ACK_REACTION=`).
+
+### Разрешения на tool-коллы (permission relay)
+
+Когда Claude запрашивает разрешение на инструмент, коннектор отправляет запрос **в ЛС последнему
+написавшему** (не в тред/канал, чтобы не засорять обсуждение): `🔐 Claude просит разрешение: Bash …
+Ответь yes <код> / no <код>`. Ответ принимается только в ЛС и только от этого пользователя; такие
+сообщения не форвардятся как промпты. Если входящих из Time ещё не было — разрешение подтверждается
+в терминале как обычно.
+
+### Переменные окружения
+
+| Переменная | По умолчанию | Назначение |
+|---|---|---|
+| `TIME_BOT_TOKEN` | — | токен бот-аккаунта (обязательно) |
+| `TIME_BASE_URL` | `https://your-company.time-messenger.ru` | адрес Time |
+| `TIME_CONNECTOR_ALLOWED_USERS` | — | whitelist, если нет в `team-config.json` |
+| `TIME_TEAM_CONFIG` | авто (overlay root / корень репо) | путь к `team-config.json` |
+| `TIME_CONNECTOR_RUNTIME` | авто (`bun` → `node`) | принудительно `bun` или `node` |
+| `TIME_CONNECTOR_ACK_REACTION` | `eyes` | реакция-ack на входящее, пусто — отключить |
+| `TIME_CONNECTOR_CHUNK_LIMIT` | `16000` | максимальная длина одного поста |
+| `TIME_CONNECTOR_IGNORE_BOTS` | `true` | игнорировать сообщения других ботов |
+
+### Ограничения v1
+
+- Вложения не скачиваются (в теге только `file_count`); истории сообщений нет — при необходимости
+  Claude использует `time-messages.sh thread <root_id>`.
+- После рестарта сервера follow-up в треде, который начал человек (ответ на @упоминание), требует
+  нового @упоминания; треды с корнем от бота подхватываются всегда.
+- Две сессии с одним токеном бота получат и ответят на одно и то же сообщение — запускай один коннектор на бота.
+- Channels — research preview: флаги и протокол могут измениться.
+
+### Troubleshooting коннектора
+
+| Симптом | Причина | Решение |
+|---|---|---|
+| `blocked by org policy` при старте | Channels выключены для организации | админ: `channelsEnabled: true` |
+| `plugin not on approved list` | ai-hub нет в allowlist | `--dangerously-load-development-channels …` или `allowedChannelPlugins` |
+| `ws: authentication failed` | токен неверный/отозван | `time-connector.sh check`, обнови `TIME_BOT_TOKEN` |
+| `error:token_invalid` в `check` | токен не принят (401) | то же |
+| бот молчит на @упоминание в канале | бот не в канале / юзер не в whitelist / сессия без флага | `/invite @бот`, проверь whitelist, перезапусти `claude` с флагом |
+| `reply failed … 403` | нет прав постить | права «Post to channels» у бота, членство в канале |
+| `no suitable runtime` | нет bun / node ≥ 22.6 | поставь bun или обнови Node |
+| ошибки зависимостей | битый `node_modules` | `rm -rf integrations/time/connector/node_modules` и перезапусти |
+| тесты | — | `bash tests/time-connector-unit.sh`, `bats integrations/time/tests/` |
 
 ## API Reference
 

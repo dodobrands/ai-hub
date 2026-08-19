@@ -37,6 +37,9 @@
     "channels": {
       "dev": "your-team-dev",
       "general": "your-team-general"
+    },
+    "connector": {
+      "allowed_users": []
     }
   },
   "buildin": {
