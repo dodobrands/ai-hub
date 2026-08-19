@@ -135,6 +135,27 @@ hub_overlay_root() {
     return 1
 }
 
+# Locate the team's team-config.json for a script living in <start_dir>:
+#   1. $TEAM_CONFIG_FILE if set (explicit override)
+#   2. overlay root discovered by hub_load_env (where .env lives)
+#   3. git toplevel of <start_dir>
+#   4. <start_dir>/../../.. (integrations/<plugin>/scripts → repo root)
+# Prints the path on success, returns 1 if none exists. Call after hub_load_env.
+hub_team_config() {
+    local start="${1:-.}" c
+    if [[ -n "${TEAM_CONFIG_FILE:-}" ]]; then
+        [[ -f "$TEAM_CONFIG_FILE" ]] && { echo "$TEAM_CONFIG_FILE"; return 0; }
+        return 1
+    fi
+    for c in \
+        "${HUB_OVERLAY_ROOT:-/nonexistent}/team-config.json" \
+        "$(git -C "$start" rev-parse --show-toplevel 2>/dev/null || echo /nonexistent)/team-config.json" \
+        "$start/../../../team-config.json"; do
+        if [[ -f "$c" ]]; then echo "$c"; return 0; fi
+    done
+    return 1
+}
+
 # Resolve a file inside a sibling plugin, supporting both layouts:
 #   1. Marketplace / source: <root>/integrations/<plugin>/<rel>
 #   2. Claude Code plugin cache: <cache>/<marketplace>/<plugin>/<version>/<rel>

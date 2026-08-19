@@ -204,16 +204,18 @@ mcp.setNotificationHandler(
   async ({ params }) => {
     const { request_id, tool_name, description, input_preview } = params
     pendingPermissions.set(request_id, { tool_name, description, input_preview })
-    if (!lastActive) {
+    // Snapshot the target: `lastActive` may be replaced by another sender while we await.
+    const target = lastActive
+    if (!target) {
       log(`permission_request ${request_id} (${tool_name}): no active Time sender — approve in the terminal`)
       return
     }
     try {
-      if (!lastActive.dm_channel_id) {
-        const dm = await api.createDirectChannel(me.id, lastActive.user_id)
-        lastActive.dm_channel_id = dm.id
+      if (!target.dm_channel_id) {
+        const dm = await api.createDirectChannel(me.id, target.user_id)
+        target.dm_channel_id = dm.id
       }
-      knownChannels.add(lastActive.dm_channel_id)
+      knownChannels.add(target.dm_channel_id)
       const preview = input_preview.length > 1500 ? input_preview.slice(0, 1500) + '…' : input_preview
       const text = [
         `🔐 Claude просит разрешение: **${tool_name}**`,
@@ -225,9 +227,9 @@ mcp.setNotificationHandler(
       ]
         .filter(Boolean)
         .join('\n')
-      await api.createPost({ channel_id: lastActive.dm_channel_id, message: text })
+      await api.createPost({ channel_id: target.dm_channel_id, message: text })
     } catch (e) {
-      log(`permission_request ${request_id}: DM to @${lastActive.username} failed: ${e}`)
+      log(`permission_request ${request_id}: DM to @${target.username} failed: ${e}`)
     }
   },
 )
@@ -366,7 +368,13 @@ async function onWsEvent(ev: unknown): Promise<void> {
     log(`drop: ${data.sender_name || post.user_id} not in whitelist (${data.channel_type === 'D' ? 'DM' : data.channel_name})`)
     return
   }
-  const sender = (await api.getUser(post.user_id)) ?? { id: post.user_id, username: data.sender_name.replace(/^@/, '') || post.user_id }
+  let sender: MmUser | null = null
+  try {
+    sender = await api.getUser(post.user_id)
+  } catch (e) {
+    log(`user lookup ${post.user_id} failed (${e}); continuing with event data`)
+  }
+  sender ??= { id: post.user_id, username: data.sender_name.replace(/^@/, '') || post.user_id }
   if (cfg.ignoreBots && sender.is_bot) {
     log(`drop: @${sender.username} is a bot`)
     return
@@ -375,7 +383,8 @@ async function onWsEvent(ev: unknown): Promise<void> {
   // Permission reply intercept — DM only, only from the sender we relayed to.
   if (data.channel_type === 'D') {
     const m = PERMISSION_REPLY_RE.exec(post.message)
-    if (m) {
+    // Only intercept codes we actually relayed — "yes maybe" is a normal message otherwise.
+    if (m && pendingPermissions.has(m[2]!.toLowerCase())) {
       const request_id = m[2]!.toLowerCase()
       const allow = m[1]!.toLowerCase().startsWith('y')
       if (!lastActive || lastActive.user_id !== sender.id) {

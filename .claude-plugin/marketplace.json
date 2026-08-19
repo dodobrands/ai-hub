@@ -108,7 +108,7 @@
     {
       "name": "hub-meta",
       "description": "AI Hub meta-tools — setup wizard, create new commands, run session retrospectives, update subtree from upstream",
-      "version": "1.2.1",
+      "version": "1.2.3",
       "author": {
         "name": "AI Hub Contributors"
       },

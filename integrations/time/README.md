@@ -9,7 +9,6 @@ integrations/time/
 ├── .cache/                        # Локальный кэш каналов и storage-state (gitignored)
 ├── .time-signature                # Подпись сообщений (gitignored)
 ├── .claude-plugin/plugin.json
-├── .mcp.json                      # MCP-сервер time-connector (Claude Code Channel) для plugin-раскладки
 ├── README.md
 ├── commands/
 │   ├── time-chat.md              # /ai-hub:time-chat — каналы/сообщения
@@ -274,7 +273,7 @@ bash integrations/hub-meta/scripts/env-manager.sh set TIME_BOT_TOKEN <token>
 Claude Code). Пустой whitelist = дропается всё (сервер предупредит при старте).
 
 Приоритет источников:
-1. `team-config.json` → `time.connector.allowed_users: ["j.doe", "a.smith"]` (overlay-конфиг команды);
+1. `team-config.json` → `time.connector.allowed_users: ["j.doe", "a.smith"]` (overlay-конфиг команды; пустой массив = не задано);
 2. `.env` → `TIME_CONNECTOR_ALLOWED_USERS=j.doe,a.smith`.
 
 Username'ы резолвятся в id при старте и раз в 10 минут; нераспознанные попадут в warning.
@@ -289,17 +288,22 @@ Username'ы резолвятся в id при старте и раз в 10 ми�
 bash integrations/time/scripts/time-connector.sh check
 ```
 
-Варианты запуска:
+Запуск одинаков для всех раскладок (клон, overlay, plugin-cache): сервер регистрируется один раз
+на уровне пользователя, затем `claude` стартует с флагом:
 
-| Раскладка | Команда |
-|---|---|
-| Плагин из marketplace (`/plugin install time@ai-hub`) | `claude --dangerously-load-development-channels plugin:time@ai-hub` |
-| Клон / overlay-репо | `claude mcp add --scope user time-connector -- bash "$PWD/integrations/time/scripts/time-connector.sh" serve`, затем `claude --dangerously-load-development-channels server:time-connector` |
-| Проектный `.mcp.json` overlay-репо | добавь сервер `time-connector` с `command: bash`, `args: ["integrations/time/scripts/time-connector.sh", "serve"]` и запускай `… server:time-connector` |
+```bash
+# путь: integrations/time/scripts в клоне/overlay или ~/.claude/plugins/cache/ai-hub/time/<ver>/scripts
+claude mcp add --scope user time-connector -- bash "<путь>/time-connector.sh" serve
+claude --dangerously-load-development-channels server:time-connector
+```
 
-`--channels plugin:time@ai-hub` (без `dangerously`) заработает, когда админ организации добавит
-ai-hub в `allowedChannelPlugins`. При старте с dev-флагом Claude Code показывает предупреждение —
-это ожидаемо. Проверка: `/mcp` → `time-connector` connected, тулы `reply`, `react`.
+Коннектор сознательно **не** объявлен в plugin-уровневом `.mcp.json`: иначе он стартовал бы в каждой
+сессии с плагином `time` — без флага channels Claude Code игнорирует входящие, а бот при этом уже
+«акает» коллегам реакцией и typing'ом, и N сессий = N ботов на один токен. Один коннектор на бота.
+После обновления плагина путь в кеше меняется — `/ai-hub:time-connector` перерегистрирует сервер.
+
+При старте с dev-флагом Claude Code показывает предупреждение — это ожидаемо. Проверка: `/mcp` →
+`time-connector` connected, тулы `reply`, `react`.
 
 Зависимости `connector/node_modules` ставятся автоматически при первом запуске (`bun install` /
 `npm install`, вывод уходит в stderr).
@@ -333,7 +337,7 @@ Claude отвечает `reply(channel_id, text, root_id)` — `root_id` бер�
 | `TIME_BOT_TOKEN` | — | токен бот-аккаунта (обязательно) |
 | `TIME_BASE_URL` | `https://your-company.time-messenger.ru` | адрес Time |
 | `TIME_CONNECTOR_ALLOWED_USERS` | — | whitelist, если нет в `team-config.json` |
-| `TIME_TEAM_CONFIG` | авто (overlay root / корень репо) | путь к `team-config.json` |
+| `TIME_TEAM_CONFIG` | авто (`hub_team_config`: overlay root → git toplevel → корень репо) | путь к `team-config.json` |
 | `TIME_CONNECTOR_RUNTIME` | авто (`bun` → `node`) | принудительно `bun` или `node` |
 | `TIME_CONNECTOR_ACK_REACTION` | `eyes` | реакция-ack на входящее, пусто — отключить |
 | `TIME_CONNECTOR_CHUNK_LIMIT` | `16000` | максимальная длина одного поста |
@@ -353,7 +357,6 @@ Claude отвечает `reply(channel_id, text, root_id)` — `root_id` бер�
 | Симптом | Причина | Решение |
 |---|---|---|
 | `blocked by org policy` при старте | Channels выключены для организации | админ: `channelsEnabled: true` |
-| `plugin not on approved list` | ai-hub нет в allowlist | `--dangerously-load-development-channels …` или `allowedChannelPlugins` |
 | `ws: authentication failed` | токен неверный/отозван | `time-connector.sh check`, обнови `TIME_BOT_TOKEN` |
 | `error:token_invalid` в `check` | токен не принят (401) | то же |
 | бот молчит на @упоминание в канале | бот не в канале / юзер не в whitelist / сессия без флага | `/invite @бот`, проверь whitelist, перезапусти `claude` с флагом |

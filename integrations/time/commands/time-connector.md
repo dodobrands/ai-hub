@@ -47,7 +47,7 @@ bash "$TIME_SCRIPTS/time-connector.sh" print-env
     членство в каналах, где его будут упоминать (`/invite @имя-бота`); ЛС работают без приглашений;
   - токен записывается в `.env` **в терминале**, не в чат:
     `bash integrations/hub-meta/scripts/env-manager.sh set TIME_BOT_TOKEN <token>`
-    (в plugin-cache раскладке — `bash "$TIME_SCRIPTS/../../hub-meta/"*/scripts/env-manager.sh set …`).
+    (в plugin-cache раскладке — `bash "$(ls -d "$TIME_SCRIPTS"/../../../hub-meta/*/scripts | sort -V | tail -1)/env-manager.sh" set …`).
   После этого — повтори Шаг 1.
 - **Whitelist.** Если `TIME_TEAM_CONFIG` указывает на файл — проверь в нём
   `.time.connector.allowed_users` (`jq '.time.connector.allowed_users' <файл>`). Если пусто и
@@ -68,32 +68,33 @@ bash "$TIME_SCRIPTS/time-connector.sh" check
 
 Если аргумент команды — `check`, на этом остановись.
 
-### Шаг 3. Команда запуска
+### Шаг 3. Регистрация MCP-сервера и команда запуска
 
-Определи раскладку и напечатай пользователю **готовую команду** (не запускай `claude` сам):
+Коннектор **намеренно не объявлен в plugin-уровневом `.mcp.json`** — иначе он стартовал бы в
+каждой сессии с плагином `time` (и без флага channels молча «акал» бы коллегам). Поэтому сервер
+регистрируется один раз на уровне пользователя, одинаково для всех раскладок (клон, overlay,
+plugin-cache) — путь берётся из `$TIME_SCRIPTS`:
 
-- **Установлен как плагин** (`$CLAUDE_PLUGIN_ROOT` непустой, путь содержит `plugins/cache`):
-  ```
-  claude --dangerously-load-development-channels plugin:time@ai-hub
-  ```
-- **Клон / overlay-репо**: зарегистрируй MCP-сервер на уровне пользователя (идемпотентно —
-  сначала `claude mcp get time-connector`; если уже есть, пропусти) — **спроси подтверждение**
-  перед `claude mcp add`:
-  ```bash
-  claude mcp add --scope user time-connector -- bash "$TIME_SCRIPTS/time-connector.sh" serve
-  ```
-  и затем:
-  ```
-  claude --dangerously-load-development-channels server:time-connector
-  ```
+1. Проверь, что уже зарегистрировано: `claude mcp get time-connector`. Если сервера нет **или** его
+   путь не совпадает с `$TIME_SCRIPTS/time-connector.sh` (например, после обновления плагина
+   сменилась версия в пути) — **спроси подтверждение** и выполни:
+   ```bash
+   claude mcp remove --scope user time-connector 2>/dev/null
+   claude mcp add --scope user time-connector -- bash "$TIME_SCRIPTS/time-connector.sh" serve
+   ```
+2. Напечатай пользователю команду запуска (не запускай `claude` сам):
+   ```
+   claude --dangerously-load-development-channels server:time-connector
+   ```
 
 Объясни:
 - флаг работает только при старте — нужно выйти из текущей сессии и запустить `claude` с ним;
   при старте Claude Code покажет предупреждение о dev-channels — это ожидаемо;
-- `--channels plugin:time@ai-hub` (без `dangerously`) заработает, только когда админ организации
-  добавит ai-hub в `allowedChannelPlugins`; для Team/Enterprise также должен быть включён
-  `channelsEnabled`;
+- для Team/Enterprise админ должен включить Channels (`channelsEnabled`);
+- один коннектор на бота: две сессии с флагом ответят на одно сообщение обе;
 - проверка: `/mcp` в новой сессии покажет `time-connector` connected с тулами `reply` и `react`.
+  В сессиях **без** флага сервер тоже стартует (он user-scope) — это безобидно, но если мешает,
+  `claude mcp remove --scope user time-connector` между использованиями.
 
 ### Шаг 4. Быстрая проверка в Time
 

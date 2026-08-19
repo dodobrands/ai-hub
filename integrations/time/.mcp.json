@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "time-connector": {
-      "command": "bash",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/time-connector.sh", "serve"]
-    }
-  }
-}

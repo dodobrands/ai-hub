@@ -7,14 +7,18 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
 
 declare const Bun: any
+const HERE = dirname(fileURLToPath(import.meta.url))
+// Needs bun (Bun.serve for the fake) and installed deps for server.ts; pure unit tests above run without either.
 const HAS_BUN = typeof Bun !== 'undefined'
+const HAS_DEPS = existsSync(join(HERE, '..', 'node_modules', '@modelcontextprotocol', 'sdk'))
 const BOT = 'botid00000000000000000000000'
 const HUMAN = 'humanid000000000000000000000'
 const OTHER = 'otherid000000000000000000000'
 
-test('connector e2e against fake Mattermost', { skip: !HAS_BUN, timeout: 30000 }, async () => {
+test('connector e2e against fake Mattermost', { skip: !HAS_BUN ? 'requires bun' : !HAS_DEPS ? 'run bun install in connector/ first' : false, timeout: 30000 }, async () => {
   const created: any[] = []
   const reactions: string[] = []
   const typing: string[] = []
@@ -56,13 +60,13 @@ test('connector e2e against fake Mattermost', { skip: !HAS_BUN, timeout: 30000 }
         setTimeout(() => posted({ id: 'p-mention', channel_id: 'c1', root_id: '', user_id: HUMAN, message: '@claude-bot ping' }, { mentions: JSON.stringify([BOT]) }), 300)
         setTimeout(() => posted({ id: 'p-thread', channel_id: 'c1', root_id: 'root-bot', user_id: HUMAN, message: 'follow-up' }), 400)
         setTimeout(() => posted({ id: 'p-plain', channel_id: 'c1', root_id: '', user_id: HUMAN, message: 'nothing' }), 500)
-        setTimeout(() => posted({ id: 'p-yes', channel_id: 'dm1', root_id: '', user_id: HUMAN, message: 'yes abcde' }, { channel_type: 'D' }), 900)
+        setTimeout(() => posted({ id: 'p-yes-noreq', channel_id: 'dm1', root_id: '', user_id: HUMAN, message: 'yes maybe' }, { channel_type: 'D' }), 700)
+        setTimeout(() => posted({ id: 'p-yes', channel_id: 'dm1', root_id: '', user_id: HUMAN, message: 'yes abcde' }, { channel_type: 'D' }), 1900)
       },
     },
   })
 
-  const here = dirname(fileURLToPath(import.meta.url))
-  const child = spawn('bun', [join(here, '..', 'server.ts'), 'serve'], {
+  const child = spawn('bun', [join(HERE, '..', 'server.ts'), 'serve'], {
     env: { ...process.env, TIME_BOT_TOKEN: 'good', TIME_BASE_URL: `http://127.0.0.1:${fake.port}`, TIME_CONNECTOR_ALLOWED_USERS: 'j.doe', TIME_TEAM_CONFIG: '' },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
@@ -94,7 +98,7 @@ test('connector e2e against fake Mattermost', { skip: !HAS_BUN, timeout: 30000 }
     send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'reply', arguments: { channel_id: 'c1', text: 'pong', root_id: 'p-mention' } } })
     send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'reply', arguments: { channel_id: 'elsewhere', text: 'nope' } } })
     send({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'react', arguments: { post_id: 'p-dm', emoji: ':white_check_mark:' } } })
-    await sleep(800)
+    await sleep(1200)
 
     const init = results.get(1)
     assert.ok(init.capabilities.experimental['claude/channel'])
@@ -106,6 +110,7 @@ test('connector e2e against fake Mattermost', { skip: !HAS_BUN, timeout: 30000 }
       ['dm', 'p-dm', ''],
       ['mention', 'p-mention', 'p-mention'],
       ['thread', 'p-thread', 'root-bot'],
+      ['dm', 'p-yes-noreq', ''], // "yes maybe" without a pending request is an ordinary message
     ])
     assert.equal(inbound[0].content, 'hello from dm')
     assert.equal(inbound[0].meta.user, 'j.doe')

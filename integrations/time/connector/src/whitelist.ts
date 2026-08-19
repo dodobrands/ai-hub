@@ -33,7 +33,10 @@ export function parseEnvList(value: string | null | undefined): string[] {
   return dedupe(value.split(/[,\s]+/))
 }
 
-/** Extracts `.time.connector.allowed_users` from a team-config.json text. Returns null if absent/invalid. */
+/**
+ * Extracts `.time.connector.allowed_users` from a team-config.json text.
+ * Returns null if absent, invalid or EMPTY (the example config ships `[]`) so the env fallback still applies.
+ */
 export function parseTeamConfigUsers(json: string | null | undefined): string[] | null {
   if (!json) return null
   let parsed: unknown
@@ -44,7 +47,8 @@ export function parseTeamConfigUsers(json: string | null | undefined): string[] 
   }
   const users = (parsed as any)?.time?.connector?.allowed_users
   if (!Array.isArray(users)) return null
-  return dedupe(users.filter((u: unknown) => typeof u === 'string'))
+  const list = dedupe(users.filter((u: unknown) => typeof u === 'string'))
+  return list.length ? list : null
 }
 
 export function parseAllowedUsers(opts: {

@@ -118,6 +118,8 @@ export type WsOptions = {
   log: (msg: string) => void
   /** No frames for this long → force reconnect (half-open TCP guard). */
   livenessMs?: number
+  /** Application-level `ping` interval; replies keep the liveness timer alive on idle servers. */
+  pingMs?: number
 }
 
 export class MattermostWs {
@@ -126,6 +128,7 @@ export class MattermostWs {
   private attempt = 0
   private closedByUs = false
   private liveness: ReturnType<typeof setTimeout> | null = null
+  private pinger: ReturnType<typeof setInterval> | null = null
   private authSeq = 0
   private baseUrl: string
   private token: string
@@ -170,6 +173,7 @@ export class MattermostWs {
       if (msg.event === 'hello') {
         this.attempt = 0
         this.opts.log('ws: authenticated')
+        this.startPinger()
         this.opts.onAuth?.()
         return
       }
@@ -191,6 +195,7 @@ export class MattermostWs {
     }
     ws.onclose = () => {
       this.clearLiveness()
+      this.stopPinger()
       if (this.ws === ws) this.ws = null
       if (this.closedByUs) return
       this.scheduleReconnect()
@@ -203,6 +208,26 @@ export class MattermostWs {
     this.attempt = Math.min(this.attempt + 1, 10)
     this.opts.log(`ws: disconnected, reconnect in ${delay}ms`)
     setTimeout(() => this.connect(), delay).unref?.()
+  }
+
+  // Protocol-level pings from the server are invisible to onmessage, so on a quiet server the
+  // liveness timer would fire spuriously. Mattermost answers `{"action":"ping"}` with a status
+  // frame, which counts as traffic.
+  private startPinger(): void {
+    this.stopPinger()
+    const ms = this.opts.pingMs ?? 30000
+    this.pinger = setInterval(() => {
+      if (!this.connected) return
+      try {
+        this.ws!.send(JSON.stringify({ seq: this.seq++, action: 'ping' }))
+      } catch {}
+    }, ms)
+    this.pinger.unref?.()
+  }
+
+  private stopPinger(): void {
+    if (this.pinger) clearInterval(this.pinger)
+    this.pinger = null
   }
 
   private bumpLiveness(): void {
@@ -230,6 +255,7 @@ export class MattermostWs {
   close(): void {
     this.closedByUs = true
     this.clearLiveness()
+    this.stopPinger()
     try {
       this.ws?.close()
     } catch {}

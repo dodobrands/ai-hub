@@ -23,12 +23,13 @@ test('nothing configured → empty with source none', () => {
   assert.deepEqual(parseAllowedUsers({ teamConfigJson: '{bad json', envValue: '' }), { users: [], source: 'none' })
 })
 
-test('empty array in team-config is authoritative (does not fall back to env)', () => {
+test('empty array in team-config (example default) falls back to env', () => {
   const r = parseAllowedUsers({
     teamConfigJson: JSON.stringify({ time: { connector: { allowed_users: [] } } }),
     envValue: 'a.smith',
   })
-  assert.deepEqual(r, { users: [], source: 'team-config' })
+  assert.deepEqual(r, { users: ['a.smith'], source: 'env' })
+  assert.deepEqual(parseAllowedUsers({ teamConfigJson: JSON.stringify({ time: { connector: { allowed_users: [] } } }) }), { users: [], source: 'none' })
 })
 
 test('normalisation: strip @, lowercase, dedupe, drop non-strings', () => {

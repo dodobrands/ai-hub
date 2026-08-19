@@ -1,7 +1,8 @@
 #!/bin/bash
 # Gate: unit tests of the Time connector (integrations/time/connector) — pure TS modules under
 # `bun test` or `node --test` (strip-types, node >= 22.6). Network-free; no npm install needed
-# because src/* import nothing outside the standard library.
+# because src/* import nothing outside the standard library (the bun-only e2e test skips itself
+# when connector/node_modules is absent).
 set -uo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/integrations/time/connector"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"

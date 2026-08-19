@@ -33,14 +33,10 @@ CONNECTOR_DIR="$SCRIPT_DIR/../connector"
 
 export TIME_BASE_URL="${TIME_BASE_URL:-https://your-company.time-messenger.ru}"
 
-# team-config.json: explicit → overlay root → git toplevel → repo root relative to this script
-if [[ -z "${TIME_TEAM_CONFIG:-}" ]]; then
-    for c in \
-        "${HUB_OVERLAY_ROOT:-/nonexistent}/team-config.json" \
-        "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo /nonexistent)/team-config.json" \
-        "$SCRIPT_DIR/../../../team-config.json"; do
-        if [[ -f "$c" ]]; then TIME_TEAM_CONFIG="$c"; break; fi
-    done
+# team-config.json (whitelist): explicit TIME_TEAM_CONFIG → shared hub_team_config (overlay root →
+# git toplevel → repo root relative to this script). Exported for server.ts.
+if [[ -z "${TIME_TEAM_CONFIG:-}" ]] && declare -F hub_team_config >/dev/null; then
+    TIME_TEAM_CONFIG=$(hub_team_config "$SCRIPT_DIR" || true)
 fi
 export TIME_TEAM_CONFIG="${TIME_TEAM_CONFIG:-}"
 
