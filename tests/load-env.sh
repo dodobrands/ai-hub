@@ -39,6 +39,14 @@ run_load(){ # start_dir home [xdg_config_home]
     ' _ "$LOAD_ENV" "$1" )
 }
 
+# Прогон hub_load_env в изолированном HOME, но нужен только код возврата.
+run_load_rc(){ # start_dir home
+  ( HOME="$2" CLAUDE_PLUGIN_ROOT="" bash -c '
+      . "$1"
+      hub_load_env "$2"
+    ' _ "$LOAD_ENV" "$1" >/dev/null 2>&1; echo $? )
+}
+
 # ============================================================================
 # 1) hub_load_env: приоритет «ближайший .env → профиль пользователя»
 # ============================================================================
@@ -134,6 +142,64 @@ printf %s \"\$_hub_load_env_sh\"" 2>/dev/null )"
   fi
   echo "| $rel | $r |" >> "$SUM"
 done
+
+# ============================================================================
+# 3) HUB_ENV_FILE: явный override пути к .env
+# ============================================================================
+# Зачем: при установке плагином скрипты лежат в ~/.claude/plugins/cache/..., и
+# обход вверх физически не может дойти до проекта, откуда запущен агент —
+# остаются только account-wide фолбэки, то есть один токен на все проекты.
+# HUB_ENV_FILE (его уже уважает env-manager.sh при записи) позволяет держать
+# токен в <проект>/.env.
+echo
+echo "== HUB_ENV_FILE (явный override) =="
+{ echo; echo "### Override пути — HUB_ENV_FILE"; echo; echo "| Сценарий | Итог |"; echo "|---|---|"; } >> "$SUM"
+
+# 3.1 Override сильнее и обхода вверх, и профиля.
+H="$TMP/o1/home"
+CACHE="$H/.claude/plugins/cache/ai-hub"
+PROJ="$TMP/o1/pet-project"
+mkdir -p "$CACHE/kaiten/1.2.1/scripts" "$PROJ"
+mkenv "$CACHE/.env" from_cache
+mkenv "$H/.ai-hub/.env" from_profile
+mkenv "$PROJ/.env" from_project
+check "override приоритетнее обхода вверх и профиля" \
+      "from_project" \
+      "$(HUB_ENV_FILE="$PROJ/.env" run_load "$CACHE/kaiten/1.2.1/scripts" "$H")"
+
+# 3.2 Задан, но файла нет → rc=1, БЕЗ тихого фолбэка на account-wide .env.
+H="$TMP/o2/home"
+CACHE="$H/.claude/plugins/cache/ai-hub"
+mkdir -p "$CACHE/kaiten/1.2.1/scripts"
+mkenv "$CACHE/.env" from_cache
+mkenv "$H/.ai-hub/.env" from_profile
+check "override на несуществующий файл: токен не подхвачен" \
+      "" \
+      "$(HUB_ENV_FILE="$TMP/o2/nope/.env" run_load "$CACHE/kaiten/1.2.1/scripts" "$H")"
+check "override на несуществующий файл: rc=1" \
+      "1" \
+      "$(HUB_ENV_FILE="$TMP/o2/nope/.env" run_load_rc "$CACHE/kaiten/1.2.1/scripts" "$H")"
+
+# 3.3 HUB_OVERLAY_ROOT = каталог override-файла (там же ищут team-config.json).
+H="$TMP/o3/home"
+CACHE="$H/.claude/plugins/cache/ai-hub"
+PROJ="$TMP/o3/team-repo"
+mkdir -p "$CACHE/kaiten/1.2.1/scripts" "$PROJ"
+mkenv "$PROJ/.env" from_project
+got=$( HOME="$H" HUB_ENV_FILE="$PROJ/.env" CLAUDE_PLUGIN_ROOT="" bash -c '
+    . "$1"
+    hub_load_env "$2" || exit 0
+    printf %s "$HUB_OVERLAY_ROOT"
+  ' _ "$LOAD_ENV" "$CACHE/kaiten/1.2.1/scripts" )
+check "override задаёт HUB_OVERLAY_ROOT" "$PROJ" "$got"
+
+# 3.4 Пустой HUB_ENV_FILE = не задан: обычное поведение не ломается.
+H="$TMP/o4/home"
+CACHE="$H/.claude/plugins/cache/ai-hub"
+mkdir -p "$CACHE/kaiten/1.2.1/scripts"
+mkenv "$CACHE/.env" from_cache
+check "пустой HUB_ENV_FILE не отменяет обход вверх" \
+      "from_cache" "$(HUB_ENV_FILE="" run_load "$CACHE/kaiten/1.2.1/scripts" "$H")"
 
 echo
 if [ $FAILS -eq 0 ]; then
