@@ -80,7 +80,10 @@ hub_load_env() {
     # account-wide, and silently widening a deliberately project-scoped token
     # is worse than a loud failure.
     if [[ -n "${HUB_ENV_FILE:-}" ]]; then
-        [[ -f "$HUB_ENV_FILE" ]] || return 1
+        if [[ ! -f "$HUB_ENV_FILE" ]]; then
+            echo "error:HUB_ENV_FILE is set but points to a missing file: $HUB_ENV_FILE" >&2
+            return 1
+        fi
         set -a
         # shellcheck disable=SC1090,SC1091
         source "$HUB_ENV_FILE"
@@ -130,6 +133,11 @@ hub_load_env() {
     fi
 
     if [[ ${#found[@]} -eq 0 ]]; then
+        # Callers run under `set -e`, so an unexplained return 1 kills the
+        # script with no output at all. Name the paths that were tried.
+        echo "error:no .env found — walked up from $start, then tried" \
+             "${XDG_CONFIG_HOME:-$HOME/.config}/ai-hub/.env, $HOME/.ai-hub/.env," \
+             "$HOME/.claude/plugins/cache/ai-hub/.env" >&2
         return 1
     fi
 
