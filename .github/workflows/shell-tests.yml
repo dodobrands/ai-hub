@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - 'integrations/**'
+      - 'scripts/**'
       - 'tests/**'
       - '.github/workflows/shell-tests.yml'
   push:
