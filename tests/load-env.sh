@@ -62,6 +62,15 @@ mkenv "$H/.claude/plugins/cache/ai-hub/.env" from_cache_profile
 check "marketplace-раскладка: фолбэк на ~/.claude/plugins/cache/ai-hub/.env" \
       "from_cache_profile" "$(run_load "$MKT" "$H")"
 
+# 1.2b Standalone-клон вне ~/.claude + токены лежат в ~/.claude/plugins/.env (куда доходит
+#      walk-up у plugin-cache скриптов): последний профильный фолбэк.
+H="$TMP/c2b/home"
+CLONE="$H/src/ai-hub/integrations/time/scripts"
+mkdir -p "$CLONE"
+mkenv "$H/.claude/plugins/.env" from_plugins_root
+check "standalone-клон: фолбэк на ~/.claude/plugins/.env" \
+      "from_plugins_root" "$(run_load "$CLONE" "$H")"
+
 # 1.3 Репозиторный .env сильнее профиля.
 H="$TMP/c3/home"
 REPO_DIR="$TMP/c3/team-repo"

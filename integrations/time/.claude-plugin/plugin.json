@@ -1,7 +1,7 @@
 {
   "name": "time",
-  "version": "1.1.4",
-  "description": "Time (Mattermost) API client — чтение каналов, сообщений, тредов",
+  "version": "1.2.0",
+  "description": "Time (Mattermost) API client — чтение каналов, сообщений, тредов + Claude Code Channel connector (ЛС / @упоминание / тред бота → запущенная сессия)",
   "author": {
     "name": "AI Hub Contributors"
   }

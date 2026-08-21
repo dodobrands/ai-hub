@@ -88,6 +88,7 @@ bash integrations/hub-meta/scripts/setup.sh next
 | `KAITEN_TOKEN` | Kaiten → Настройки профиля → API/Интеграции → Создать токен |
 | `BUILDIN_UI_TOKEN` | `/ai-hub:buildin-login` — browser SSO |
 | `TIME_TOKEN` | `/ai-hub:time-login` — browser SSO |
+| `TIME_BOT_TOKEN` | Опционально — токен бот-аккаунта Time (Bot Accounts, права «Post to channels»). Нужен для постов от бота и для `/ai-hub:time-connector` |
 | `GENIE_TOKEN` | Опционально, получить у админа данных |
 | `TESTOPS_URL`, `TESTOPS_TOKEN` | Allure TestOps → Settings → API Tokens → Generate Token |
 
@@ -147,7 +148,7 @@ integrations/
 
 - **[Kaiten](integrations/kaiten/)** — универсальный клиент для Kaiten API. Чтение и запись карточек, комментариев, чек-листов, свойств, структуры досок и колонок. Фундамент для большинства других интеграций.
 
-- **[Time](integrations/time/)** `/ai-hub:time-chat` — полный доступ к мессенджеру Time (Mattermost). Чтение каналов и тредов, отправка сообщений. Логин через browser-based SSO — токен не попадает в контекст LLM.
+- **[Time](integrations/time/)** `/ai-hub:time-chat` — полный доступ к мессенджеру Time (Mattermost). Чтение каналов и тредов, отправка сообщений. Логин через browser-based SSO — токен не попадает в контекст LLM. `/ai-hub:time-connector` — опциональный мост **Claude Code Channels**: коллеги из whitelist пишут боту в Time (ЛС, @упоминание, тред бота), сообщение попадает в твою запущенную сессию, ответ уходит тем же тредом.
 
 - **[Buildin](integrations/buildin/)** `/ai-hub:buildin-read` `/ai-hub:buildin-publish` — чтение и запись во внутреннюю wiki Buildin.ai. Рекурсивное раскрытие вложенных блоков, навигация по дереву, поиск по названию.
 

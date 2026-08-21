@@ -14,6 +14,9 @@
 #        ${XDG_CONFIG_HOME:-~/.config}/ai-hub/.env
 #        ~/.ai-hub/.env
 #        ~/.claude/plugins/cache/ai-hub/.env   (where setup.sh writes it)
+#        ~/.claude/plugins/.env                 (where the walk-up from a plugin-cache
+#                                               script lands — lets a standalone clone
+#                                               share the plugin install's .env)
 #      Plugin installs live in sibling trees (~/.claude/plugins/cache/...
 #      vs ~/.claude/plugins/marketplaces/...), so a walk up from one never
 #      reaches the .env of the other.
@@ -87,7 +90,8 @@ hub_load_env() {
         local _c
         for _c in "${XDG_CONFIG_HOME:-$HOME/.config}/ai-hub/.env" \
                   "$HOME/.ai-hub/.env" \
-                  "$HOME/.claude/plugins/cache/ai-hub/.env"; do
+                  "$HOME/.claude/plugins/cache/ai-hub/.env" \
+                  "$HOME/.claude/plugins/.env"; do
             if [[ -f "$_c" ]]; then
                 found=("$_c")
                 break
@@ -128,6 +132,27 @@ hub_overlay_root() {
         echo "$HUB_OVERLAY_ROOT"
         return 0
     fi
+    return 1
+}
+
+# Locate the team's team-config.json for a script living in <start_dir>:
+#   1. $TEAM_CONFIG_FILE if set (explicit override)
+#   2. overlay root discovered by hub_load_env (where .env lives)
+#   3. git toplevel of <start_dir>
+#   4. <start_dir>/../../.. (integrations/<plugin>/scripts → repo root)
+# Prints the path on success, returns 1 if none exists. Call after hub_load_env.
+hub_team_config() {
+    local start="${1:-.}" c
+    if [[ -n "${TEAM_CONFIG_FILE:-}" ]]; then
+        [[ -f "$TEAM_CONFIG_FILE" ]] && { echo "$TEAM_CONFIG_FILE"; return 0; }
+        return 1
+    fi
+    for c in \
+        "${HUB_OVERLAY_ROOT:-/nonexistent}/team-config.json" \
+        "$(git -C "$start" rev-parse --show-toplevel 2>/dev/null || echo /nonexistent)/team-config.json" \
+        "$start/../../../team-config.json"; do
+        if [[ -f "$c" ]]; then echo "$c"; return 0; fi
+    done
     return 1
 }
 
