@@ -83,6 +83,8 @@ is_card_archive_operation() {
 # - Member removal from cards: /cards/{id}/members/{member_id}
 # - Planned relation removal: /cards/{id}/planned-relation/{target_card_id}
 #   (снимает planned-зависимость между карточками — обратимо через re-relate, не удаляет карточки)
+# - External link removal: /cards/{id}/external-links/{link_id}
+#   (снимает ссылку с карточки — сам адрес остаётся в истории карточки, вешается заново одним POST)
 is_safe_delete_operation() {
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/tags/[0-9]+$ ]]; then
         return 0
@@ -97,6 +99,9 @@ is_safe_delete_operation() {
         return 0
     fi
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/planned-relation/[0-9]+$ ]]; then
+        return 0
+    fi
+    if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/external-links/[0-9]+$ ]]; then
         return 0
     fi
     return 1
