@@ -30,6 +30,11 @@ jobs:
       - name: Install bats
         run: sudo apt-get update && sudo apt-get install -y bats
 
+      # Юнит-тесты Time-коннектора (integrations/time/connector) идут под node --test (strip-types, ≥ 22.6).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Run bats unit tests
         run: |
           set -euo pipefail

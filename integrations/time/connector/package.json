@@ -1,0 +1,21 @@
+{
+  "name": "ai-hub-time-connector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Claude Code Channel connector for Time (Mattermost): DM / @mention / bot-thread → running Claude Code session",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "scripts": {
+    "start": "bun server.ts serve",
+    "check": "bun server.ts check",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "test:bun": "bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  }
+}

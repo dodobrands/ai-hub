@@ -64,6 +64,7 @@ Claude Code CLI ищет slash-команды в `.claude/commands/`. Коман
   ai-test.md                     → ../../../integrations/test-factory/commands/ai-test.md
   time-chat.md                   → ../../../integrations/time/commands/time-chat.md
   time-login.md                  → ../../../integrations/time/commands/time-login.md
+  time-connector.md              → ../../../integrations/time/commands/time-connector.md
   code-review.md                 → ../../../integrations/code-review/commands/code-review.md
   retro.md                       → ../../../integrations/hub-meta/commands/retro.md
   kusto-query.md                 → ../../../integrations/kusto/commands/kusto-query.md
@@ -104,6 +105,7 @@ Claude Code CLI ищет slash-команды в `.claude/commands/`. Коман
 - `kaiten.space_id` — пространство команды
 - `kaiten.property_id_affected_services` — ID кастомного свойства
 - `time.channels` — ключевые каналы команды
+- `time.connector.allowed_users` — whitelist username'ов для Time-коннектора (`/ai-hub:time-connector`)
 
 Shell-скрипты (kaiten-export-board.sh и др.) читают конфиг автоматически через `jq`. Agent-команды (.md) проверяют наличие файла и используют значения.
 
@@ -116,7 +118,7 @@ Shell-скрипты (kaiten-export-board.sh и др.) читают конфиг
 - **Все команды запускаются из корня репозитория.**
 - **Клонирование репозиториев** — только после подтверждения пользователем. Клоны — в `Temp/` (в .gitignore). Только чтение, не пушить в чужие репозитории.
 - **Kaiten API** — лимит 100 запросов/мин (HTTP 429 при превышении).
-- **Зависимости**: `jq`, `python3`, `gh` (GitHub CLI).
+- **Зависимости**: `jq`, `python3`, `gh` (GitHub CLI). Опционально для Time-коннектора (`/ai-hub:time-connector`): `bun` или Node.js ≥ 22.6.
 
 ## Documentation Conventions
 
