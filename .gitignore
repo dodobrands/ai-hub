@@ -44,3 +44,6 @@ node_modules/
 
 # Large external repositories
 Temp/
+
+# Shadow-индекс Buildin — локальный кеш структуры вики, у каждого свой
+integrations/buildin/shadow-index.json
