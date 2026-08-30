@@ -2,6 +2,12 @@
 # Shared helper to load .env for all integration scripts.
 #
 # Behavior:
+#   0. If HUB_ENV_FILE is set, sources exactly that file and stops. Mirrors
+#      env-manager.sh, which already honors it when WRITING. This is the only
+#      way a plugin-cache install can use a project-local .env: the walk in
+#      step 2 starts at the script's own directory, which for a plugin install
+#      lives under ~/.claude/plugins/cache/... and never reaches the project
+#      the agent runs in.
 #   1. Unsets known secrets from inherited shell environment, so .env
 #      is the only authoritative source. Without this, a stale token in
 #      ~/.zshrc could silently override the per-repo .env file.
@@ -58,6 +64,37 @@ hub_load_env() {
         unset "$_k"
     done
 
+    # Explicit override, honored before the walk. env-manager.sh already reads
+    # HUB_ENV_FILE when WRITING (ENV_FILE="${HUB_ENV_FILE:-$WRITE_ROOT/.env}");
+    # until now the reader only ever exported it, so a token written through
+    # the override could not be read back.
+    #
+    # It also scopes a token to one project. The walk below starts at the
+    # caller's script dir, so a plugin install walks
+    # ~/.claude/plugins/cache/ai-hub/<plugin>/<version>/scripts upward and can
+    # only ever find an account-wide .env — every project on the machine then
+    # shares one token. Pointing HUB_ENV_FILE at <project>/.env (e.g. via
+    # "env" in <project>/.claude/settings.json) keeps it to that project.
+    #
+    # Set-but-missing returns 1 rather than falling through: the fallbacks are
+    # account-wide, and silently widening a deliberately project-scoped token
+    # is worse than a loud failure.
+    if [[ -n "${HUB_ENV_FILE:-}" ]]; then
+        if [[ ! -f "$HUB_ENV_FILE" ]]; then
+            echo "error:HUB_ENV_FILE is set but points to a missing file: $HUB_ENV_FILE" >&2
+            return 1
+        fi
+        set -a
+        # shellcheck disable=SC1090,SC1091
+        source "$HUB_ENV_FILE"
+        set +a
+        local _override_dir
+        _override_dir="$(dirname "$HUB_ENV_FILE")"
+        export HUB_ENV_FILE
+        export HUB_OVERLAY_ROOT="$_override_dir"
+        return 0
+    fi
+
     # Walk up collecting all .env files innermost-FIRST via append. The
     # resulting array is ordered innermost→outermost (found[0] = nearest .env,
     # found[last] = overlay root). Sourcing in that order makes the outer .env
@@ -96,6 +133,11 @@ hub_load_env() {
     fi
 
     if [[ ${#found[@]} -eq 0 ]]; then
+        # Callers run under `set -e`, so an unexplained return 1 kills the
+        # script with no output at all. Name the paths that were tried.
+        echo "error:no .env found — walked up from $start, then tried" \
+             "${XDG_CONFIG_HOME:-$HOME/.config}/ai-hub/.env, $HOME/.ai-hub/.env," \
+             "$HOME/.claude/plugins/cache/ai-hub/.env" >&2
         return 1
     fi
 
