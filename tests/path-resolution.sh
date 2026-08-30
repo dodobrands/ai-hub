@@ -9,6 +9,10 @@
 #   а для скиллов (активируются из произвольного cwd) — ещё symlink-в-~/.claude
 #   и Copilot _direct.
 #
+# Команды проверяются в каждом доступном шелле: агент выполняет сниппет в шелле
+# пользователя, и поведение расходится — в zsh несовпавший glob обрывает всю
+# подстановку, в bash он просто пропускается.
+#
 # Покрытие: buildin, kaiten, time (команды + skill).
 # Любой провал REQUIRED → exit≠0 → CI красный.
 set -u
@@ -30,9 +34,17 @@ extract_skill_resolver(){ # $1=md  (резолвер skill-time: _t=… → TIME
   sed -n '/^_t=""/,/^TIME_MESSAGES=/p' "$1"
 }
 
+# ---- шеллы ------------------------------------------------------------------
+# Сниппет выполняет агент в шелле пользователя, а не в bash: на macOS это zsh.
+# Разница не косметическая — в zsh несовпавший glob фатален для всей подстановки,
+# поэтому цепочка кандидатов обрывается на первом непопавшем шаблоне и до
+# следующих не доходит. Гоняем каждый сценарий по всем доступным шеллам.
+SHELLS=(bash)
+command -v zsh >/dev/null 2>&1 && SHELLS+=(zsh) || echo "  SKIP  zsh не установлен — ветка zsh не проверена"
+
 # ---- прогон одного сценария -------------------------------------------------
-run_cmd(){ # snippet cwd root → каталог скриптов
-  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" bash -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
+run_cmd(){ # snippet cwd root shell → каталог скриптов
+  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" "$4" -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
 }
 run_skill(){ # snippet cwd root home → полный путь скрипта
   ( cd "$2" && HOME="$4" CLAUDE_PLUGIN_ROOT="$3" bash -c "set -u; $1"$'\n''printf %s "$TIME_MESSAGES"' )
@@ -45,16 +57,19 @@ fail(){ printf '  FAIL  %s\n' "$1"; FAILS=$((FAILS+1)); }
 # 1) КОМАНДЫ: резолвер из каждого командного .md по cwd-сценариям
 # ============================================================================
 echo "== Команды (standalone / overlay / marketplace) =="
-{ echo "### Резолв пути — команды"; echo; echo "| Интеграция | Файл | Сценарий | Итог |"; echo "|---|---|---|---|"; } >> "$SUM"
+{ echo "### Резолв пути — команды"; echo; echo "| Интеграция | Файл | Сценарий | Шелл | Итог |"; echo "|---|---|---|---|---|"; } >> "$SUM"
 
 for INT in buildin kaiten time; do
   M="${MARK[$INT]}"
   ST="$TMP/$INT/standalone"
   OV="$TMP/$INT/overlay"
+  DP="$TMP/$INT/deep"
   CA="$TMP/$INT/cache/$INT/9.9.9"
   UN="$TMP/$INT/unrelated/proj"
   mk "$ST/integrations/$INT/scripts/$M"
   mk "$OV/integrations/team-overlay/integrations/$INT/scripts/$M"
+  # overlay вендорит хаб не в integrations/, а глубже — например в tools/
+  mk "$DP/tools/hub/integrations/$INT/scripts/$M"
   mk "$CA/scripts/$M"
   mkdir -p "$UN"
 
@@ -64,6 +79,7 @@ for INT in buildin kaiten time; do
     "standalone, /plugin         |$ST|$ST/integrations/$INT"
     "overlay-subtree (var нет)   |$OV|"
     "overlay-subtree, /plugin    |$OV|$OV/integrations/team-overlay/integrations/$INT"
+    "overlay вне integrations/   |$DP|"
     "marketplace (кеш плагина)   |$UN|$CA"
   )
 
@@ -74,13 +90,15 @@ for INT in buildin kaiten time; do
     base="$(basename "$md")"
     for row in "${SCN[@]}"; do
       IFS='|' read -r name cwd root <<< "$row"; name="$(echo "$name" | sed 's/ *$//')"
-      dir="$(run_cmd "$snip" "$cwd" "$root")"
-      if ( cd "$cwd" && [ -f "$dir/$M" ] ); then
-        pass "$INT/$base — $name"; r=PASS
-      else
-        fail "$INT/$base — $name → [$dir]"; r=FAIL
-      fi
-      echo "| $INT | $base | $name | $r |" >> "$SUM"
+      for sh in "${SHELLS[@]}"; do
+        dir="$(run_cmd "$snip" "$cwd" "$root" "$sh" 2>/dev/null)"
+        if ( cd "$cwd" && [ -f "$dir/$M" ] ); then
+          pass "$INT/$base — $name [$sh]"; r=PASS
+        else
+          fail "$INT/$base — $name [$sh] → [$dir]"; r=FAIL
+        fi
+        echo "| $INT | $base | $name | $sh | $r |" >> "$SUM"
+      done
     done
   done
 done

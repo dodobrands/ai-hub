@@ -22,8 +22,12 @@ allowed-tools: ["Bash", "mcp"]
 переменная между ними не сохраняется — повтори её в начале нужного блока.
 
 ```bash
-# resolve-time-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
-TIME_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/time/scripts "$PWD"/integrations/time/scripts 2>/dev/null | head -1)
+# resolve-time-dir:start — плагин-кеш, иначе поиск по форме пути от корня репозитория.
+# Без glob-ов: в zsh несовпавший шаблон обрывает всю подстановку, и до следующих
+# кандидатов дело не доходит (см. tests/path-resolution.sh).
+TIME_SCRIPTS=""
+[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/scripts/time-messages.sh" ] && TIME_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
+[ -n "$TIME_SCRIPTS" ] || TIME_SCRIPTS=$(find "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" -maxdepth 6 -type d -path '*/integrations/time/scripts' 2>/dev/null | sort | head -1)
 # resolve-time-dir:end
 TIME_DIR=$(dirname "$TIME_SCRIPTS")   # каталог интеграции — для .cache / .time-signature
 ```
