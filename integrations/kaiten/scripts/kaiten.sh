@@ -85,6 +85,9 @@ is_card_archive_operation() {
 #   (снимает planned-зависимость между карточками — обратимо через re-relate, не удаляет карточки)
 # - External link removal: /cards/{id}/external-links/{link_id}
 #   (снимает ссылку с карточки — сам адрес остаётся в истории карточки, вешается заново одним POST)
+# - Checklist removal: /cards/{id}/checklists/{checklist_id}
+#   (снимает чек-лист с карточки; удаление его пунктов уже разрешено выше, так что запрет
+#    обходился циклом и оставлял на карточке пустые списки)
 is_safe_delete_operation() {
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/tags/[0-9]+$ ]]; then
         return 0
@@ -102,6 +105,9 @@ is_safe_delete_operation() {
         return 0
     fi
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/external-links/[0-9]+$ ]]; then
+        return 0
+    fi
+    if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/checklists/[0-9]+$ ]]; then
         return 0
     fi
     return 1
