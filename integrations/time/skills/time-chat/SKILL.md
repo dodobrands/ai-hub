@@ -35,16 +35,23 @@ _t=""
 # 1) marketplace (Claude Code / Copilot / Cursor): $CLAUDE_PLUGIN_ROOT → this plugin's dir
 [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/scripts/time-messages.sh" ] && _t="$CLAUDE_PLUGIN_ROOT"
 # 2) subtree + skill symlink (a team overlay vendoring ai-hub): find our own symlink, walk up
-if [ -z "$_t" ]; then for _d in "$HOME"/.claude/skills/*; do
+#    `find`, not a glob: in zsh an unmatched glob aborts the whole command (nomatch) and
+#    `2>/dev/null` does not silence it, so an empty skills dir would kill the resolver
+if [ -z "$_t" ]; then while IFS= read -r _d; do
   [ -L "$_d" ] || continue; _r="$(readlink -f "$_d" 2>/dev/null)"
   case "$_r" in */integrations/time/skills/time-chat)
     [ -f "${_r%/skills/time-chat}/scripts/time-messages.sh" ] && { _t="${_r%/skills/time-chat}"; break; } ;;
   esac
-done; fi
+done <<EOF
+$(find "$HOME/.claude/skills" -maxdepth 1 -type l 2>/dev/null)
+EOF
+fi
 # 3) Copilot _direct install
 [ -z "$_t" ] && [ -f "$HOME/.copilot/installed-plugins/_direct/time/scripts/time-messages.sh" ] && _t="$(readlink -f "$HOME/.copilot/installed-plugins/_direct/time")"
 # 4) plain git clone (run from anywhere inside it)
 [ -z "$_t" ] && _r="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -f "$_r/integrations/time/scripts/time-messages.sh" ] && _t="$_r/integrations/time"
+# 5) marketplace install without $CLAUDE_PLUGIN_ROOT exported (skill fired from another repo)
+[ -z "$_t" ] && _r="$(find "$HOME/.claude/plugins/cache" -maxdepth 4 -type d -path '*/time/*/scripts' 2>/dev/null | sort -V | tail -1)" && [ -n "$_r" ] && _t="${_r%/scripts}"
 TIME_MESSAGES="$_t/scripts/time-messages.sh"
 ```
 
