@@ -24,8 +24,15 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 переменная между ними не сохраняется — повтори её в начале нужного блока.
 
 ```bash
-# resolve-kaiten-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
-KAITEN_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/kaiten/scripts "$PWD"/integrations/kaiten/scripts 2>/dev/null | head -1)
+# resolve-kaiten-dir:start — плагин-кеш, иначе поиск по форме пути от корня репозитория,
+# иначе кеш marketplace-установки. Без glob-ов: в zsh несовпавший шаблон обрывает всю
+# подстановку, и до следующих кандидатов дело не доходит (см. tests/path-resolution.sh).
+KAITEN_SCRIPTS=""
+[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/scripts/kaiten-cards.sh" ] && KAITEN_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
+[ -n "$KAITEN_SCRIPTS" ] || KAITEN_SCRIPTS=$(find "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" -maxdepth 6 -type d -path '*/integrations/kaiten/scripts' 2>/dev/null | sort | head -1)
+# CLAUDE_PLUGIN_ROOT экспортируется не всегда: при запуске из постороннего репозитория
+# его нет, и поиск от корня репо ничего не найдёт — берём кеш установленного плагина.
+[ -n "$KAITEN_SCRIPTS" ] || KAITEN_SCRIPTS=$(find "$HOME/.claude/plugins/cache" -maxdepth 4 -type d -path '*/kaiten/*/scripts' 2>/dev/null | sort -V | tail -1)
 # resolve-kaiten-dir:end
 ```
 
