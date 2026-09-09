@@ -21,16 +21,44 @@ BUDGET = 1240
 API = "https://buildin.ai"
 
 
-def load_token():
-    for path in (os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"),
-                 os.path.expanduser("~/dodo/ai-hub/.env")):
-        path = os.path.abspath(path)
-        if not os.path.exists(path):
+def _env_candidates():
+    """Где искать .env — порядок из hub-meta/scripts/load-env.sh.
+
+    Жёсткий путь ~/dodo/ai-hub/.env работает только у клона репозитория. При
+    установке плагином такого каталога нет, и публикация падала бы на старте.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    # вверх от скрипта до ближайшего .env: в клоне это корень репозитория
+    d = here
+    for _ in range(6):
+        yield os.path.join(d, ".env")
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    yield os.path.join(xdg, "ai-hub", ".env")
+    yield os.path.expanduser("~/.ai-hub/.env")
+    yield os.path.expanduser("~/.claude/plugins/cache/ai-hub/.env")
+    yield os.path.expanduser("~/dodo/ai-hub/.env")
+
+
+def _read_token(name="BUILDIN_UI_TOKEN"):
+    seen = []
+    for path in _env_candidates():
+        if path in seen or not os.path.exists(path):
             continue
+        seen.append(path)
         for line in open(path, encoding="utf-8"):
-            if line.startswith("BUILDIN_UI_TOKEN="):
+            if line.startswith(name + "="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise RuntimeError("BUILDIN_UI_TOKEN not found in .env")
+    raise RuntimeError(
+        "%s не найден. Искал в: %s. Обновите токен через buildin-login.sh"
+        % (name, ", ".join(seen) or "нигде — ни один .env не существует"))
+
+
+def load_token():
+    return _read_token()
 
 
 def api_get(path, token):

@@ -17,13 +17,44 @@ API_TRIES = 4          # сетевые обрывы к buildin.ai не редк
 API_TIMEOUT = 120
 API_BACKOFF = 4
 
+def _env_candidates():
+    """Где искать .env — порядок из hub-meta/scripts/load-env.sh.
+
+    Жёсткий путь ~/dodo/ai-hub/.env работает только у клона репозитория. При
+    установке плагином такого каталога нет, и публикация падала бы на старте.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    # вверх от скрипта до ближайшего .env: в клоне это корень репозитория
+    d = here
+    for _ in range(6):
+        yield os.path.join(d, ".env")
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    yield os.path.join(xdg, "ai-hub", ".env")
+    yield os.path.expanduser("~/.ai-hub/.env")
+    yield os.path.expanduser("~/.claude/plugins/cache/ai-hub/.env")
+    yield os.path.expanduser("~/dodo/ai-hub/.env")
+
+
+def _read_token(name="BUILDIN_UI_TOKEN"):
+    seen = []
+    for path in _env_candidates():
+        if path in seen or not os.path.exists(path):
+            continue
+        seen.append(path)
+        for line in open(path, encoding="utf-8"):
+            if line.startswith(name + "="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(
+        "%s не найден. Искал в: %s. Обновите токен через buildin-login.sh"
+        % (name, ", ".join(seen) or "нигде — ни один .env не существует"))
+
+
 def load_token():
-    env_path = os.path.expanduser("~/dodo/ai-hub/.env")
-    with open(env_path) as f:
-        for line in f:
-            if line.startswith("BUILDIN_UI_TOKEN="):
-                return line.strip().split("=", 1)[1]
-    raise RuntimeError("BUILDIN_UI_TOKEN not found in .env")
+    return _read_token()
 
 def api(method, endpoint, body=None, token=None):
     url = BUILDIN_BASE + endpoint
