@@ -168,7 +168,7 @@ Base URL: `https://api.buildin.ai`, auth: `Authorization: Bearer $BUILDIN_BOT_TO
 
 ## Известные ограничения
 
-- **Поиск /v1/search** — исторически возвращал 500. Если сломан — используй `buildin/` (UI API) как fallback.
+- **Поиск /v1/search — СЛОМАН (стабильно 500), подкоманда `search` заглушена** (`exit 2` с подсказкой). Не начинай задачу с поиска: читай по page_id/URL, спрашивай URL у пользователя, либо используй UI API `buildin/` (shadow-индекс + обход дерева `buildin-nav children`).
 - **Доступ** — бот видит только расшаренные ему страницы (403 для остальных).
 - **Нет API пространств** — `/v1/spaces` не существует.
 - **SDK** — [next-space/buildin-api-sdk](https://github.com/next-space/buildin-api-sdk) (Java + TypeScript, OpenAPI spec).

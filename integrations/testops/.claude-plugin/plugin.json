@@ -1,6 +1,6 @@
 {
   "name": "testops",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Allure TestOps integration: test cases, launches, projects, defects, jobs, test plans",
   "author": {
     "name": "SOM Team"

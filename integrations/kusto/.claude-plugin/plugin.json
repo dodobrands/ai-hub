@@ -1,6 +1,6 @@
 {
   "name": "kusto",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Azure Data Explorer (Kusto) integration — read-only KQL queries for logs and traces",
   "author": {
     "name": "Dmitry Afonchenko"

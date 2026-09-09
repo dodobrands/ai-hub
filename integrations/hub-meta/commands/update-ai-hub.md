@@ -1,18 +1,18 @@
 ---
 name: update-ai-hub
-description: "Обновить (подтянуть свежую версию) публичных скиллов sagos95/ai-hub в текущем overlay-репо — git subtree pull из upstream. Вызывай, когда пользователь просит: 'обнови sagos95 инструменты', 'обнови ai-hub', 'подтяни свежий ai-hub', 'update ai-hub subtree', 'обнови generic скиллы'."
+description: "Обновить (подтянуть свежую версию) публичных скиллов dodobrands/ai-hub в текущем overlay-репо — git subtree pull из upstream. Вызывай, когда пользователь просит: 'обнови ai-hub инструменты', 'обнови ai-hub', 'подтяни свежий ai-hub', 'update ai-hub subtree', 'обнови generic скиллы'."
 argument-hint: "[prefix]"
 allowed-tools: ["Bash", "Read"]
 ---
 
-# Update sagos95/ai-hub subtree
+# Update dodobrands/ai-hub subtree
 
-Скилл подтягивает свежую версию публичного `sagos95/ai-hub` в overlay-репо пользователя через `git subtree pull`.
+Скилл подтягивает свежую версию публичного `dodobrands/ai-hub` в overlay-репо пользователя через `git subtree pull`.
 
 ## Когда запускается
 
 Пользователь говорит что-то вроде:
-- «обнови sagos95 инструменты»
+- «обнови ai-hub инструменты»
 - «обнови ai-hub»
 - «подтяни свежий ai-hub»
 - «обнови generic скиллы»
@@ -33,7 +33,7 @@ PREFIX="${ARGUMENTS:-integrations/sagos95-ai-hub}"
 
 Если prefix не найден — подскажи пользователю:
 > Похоже, ai-hub ещё не подключён как subtree. Если хочешь установить — запусти:
-> `curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/install-as-subtree.sh | bash`
+> `curl -sL https://raw.githubusercontent.com/dodobrands/ai-hub/main/scripts/install-as-subtree.sh | bash`
 
 ### Шаг 2 — предпочти Makefile-таргет, если он есть
 
@@ -49,7 +49,7 @@ fi
 
 ### Шаг 3 — fallback: использовать упакованный скрипт
 
-В sagos95/ai-hub есть готовый скрипт. Если subtree уже установлен — скрипт лежит внутри:
+В dodobrands/ai-hub есть готовый скрипт. Если subtree уже установлен — скрипт лежит внутри:
 
 ```bash
 SCRIPT="$PREFIX/scripts/update-from-ai-hub.sh"
@@ -64,7 +64,7 @@ fi
 ```bash
 # Проверь, что remote ai-hub настроен
 git remote get-url ai-hub &>/dev/null || \
-  git remote add ai-hub https://github.com/sagos95/ai-hub.git
+  git remote add ai-hub https://github.com/dodobrands/ai-hub.git
 
 # Проверь что working tree чистый
 if ! git diff-index --quiet HEAD -- 2>/dev/null; then

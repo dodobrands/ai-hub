@@ -9,7 +9,7 @@
 Если хочешь дать репозиторий другому агенту, удобнее всего давать raw URL на этот файл:
 
 ```text
-https://raw.githubusercontent.com/sagos95/ai-hub/main/INSTALL.md
+https://raw.githubusercontent.com/dodobrands/ai-hub/main/INSTALL.md
 ```
 
 ---
@@ -24,7 +24,7 @@ AI Hub опубликован как marketplace-плагин. Любой AI-а�
 
 ```bash
 # Добавить marketplace (один раз)
-claude /plugin marketplace add sagos95/ai-hub
+claude /plugin marketplace add dodobrands/ai-hub
 
 # Установить все инструменты:
 claude /plugin install buildin@ai-hub code-review@ai-hub discovery@ai-hub \
@@ -42,7 +42,7 @@ claude /plugin install testops@ai-hub
 
 ```bash
 # Добавить marketplace (один раз)
-copilot plugin marketplace add sagos95/ai-hub
+copilot plugin marketplace add dodobrands/ai-hub
 
 # Установить все инструменты:
 copilot plugin install buildin@ai-hub code-review@ai-hub discovery@ai-hub \
@@ -59,7 +59,7 @@ copilot plugin install testops@ai-hub
 ### Через git clone или zip + setup
 
 ```bash
-git clone https://github.com/sagos95/ai-hub.git
+git clone https://github.com/dodobrands/ai-hub.git
 cd ai-hub
 bash integrations/hub-meta/scripts/setup.sh next
 # или: npm run setup
@@ -68,7 +68,7 @@ bash integrations/hub-meta/scripts/setup.sh next
 Если на машине нет `git`, публичный репозиторий можно скачать как архив:
 
 ```bash
-curl -L https://github.com/sagos95/ai-hub/archive/refs/heads/main.zip -o ai-hub.zip
+curl -L https://github.com/dodobrands/ai-hub/archive/refs/heads/main.zip -o ai-hub.zip
 unzip ai-hub.zip
 cd ai-hub-main
 bash integrations/hub-meta/scripts/setup.sh next
@@ -189,7 +189,7 @@ Generic-интеграции получают обновления из ai-hub, 
 Из корня своего overlay-репозитория (своего ai-hub):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/install-as-subtree.sh | bash
+curl -sL https://raw.githubusercontent.com/dodobrands/ai-hub/main/scripts/install-as-subtree.sh | bash
 ```
 
 Скрипт делает всё сам:
@@ -203,7 +203,7 @@ curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/install-a
 Свой prefix можно передать аргументом:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/install-as-subtree.sh | bash -s integrations/ai-hub
+curl -sL https://raw.githubusercontent.com/dodobrands/ai-hub/main/scripts/install-as-subtree.sh | bash -s integrations/ai-hub
 ```
 
 Другой namespace (например, чтобы команды стали `/my-hub:*`):
@@ -214,7 +214,7 @@ AI_HUB_NAMESPACE=my-hub curl -sL ... | bash
 ### Обновление subtree
 
 ```bash
-curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/update-from-ai-hub.sh | bash
+curl -sL https://raw.githubusercontent.com/dodobrands/ai-hub/main/scripts/update-from-ai-hub.sh | bash
 # либо с локальным скриптом (если сохранил его в своём репо):
 ./scripts/update-from-ai-hub.sh [prefix]
 ```
@@ -223,7 +223,7 @@ curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/update-fr
 
 ```bash
 # установка
-git remote add ai-hub https://github.com/sagos95/ai-hub.git
+git remote add ai-hub https://github.com/dodobrands/ai-hub.git
 git fetch ai-hub
 git subtree add --prefix=integrations/sagos95-ai-hub ai-hub main --squash
 
@@ -236,7 +236,7 @@ git subtree pull --prefix=integrations/sagos95-ai-hub ai-hub main --squash
 ```
 your-team-repo/
 ├── integrations/
-│   ├── sagos95-ai-hub/         ← subtree (read-only для вашей команды; если захочется внести правки, то можно создать PR в sagos95/ai-hub)
+│   ├── sagos95-ai-hub/         ← subtree (read-only для вашей команды; если захочется внести правки, то можно создать PR в dodobrands/ai-hub)
 │   ├── <your-team>-workflow/   ← команднo-специфичные скиллы
 │   └── <other-vendor>/         ← при желании — другой публичный hub как ещё один subtree
 ├── .claude/
@@ -247,7 +247,9 @@ your-team-repo/
 └── CLAUDE.md                   ← корневые инструкции (vendor-CLAUDE.md игнорятся)
 ```
 
-**Инвариант:** `integrations/sagos95-ai-hub/` — read-only. Любые правки generic-скиллов идут PR в upstream `sagos95/ai-hub`, затем `update-from-ai-hub.sh` в overlay-репо.
+**Инвариант:** `integrations/sagos95-ai-hub/` — read-only. Любые правки generic-скиллов идут PR в upstream `dodobrands/ai-hub`, затем `update-from-ai-hub.sh` в overlay-репо.
+
+> **Почему префикс называется `sagos95-ai-hub`.** Изначально репозиторий жил на личном аккаунте автора (`sagos95`) — оттуда и историческое имя папки-субтри. После переезда в организацию `dodobrands` имя префикса намеренно сохранено, чтобы не ломать пути и subtree-обвязку в уже существующих overlay-репозиториях. Сам репозиторий теперь — `dodobrands/ai-hub`; префикс менять не нужно.
 
 ---
 
@@ -259,6 +261,12 @@ claude /ai-hub:create-command my-integration my-command
 
 # Написать логику в integrations/my-integration/
 ```
+
+## Как прислать правку (PR через форк)
+
+Обычный PR из ветки внутри репозитория может создать только тот, у кого есть write-доступ (коллаборатор). Если тебя нет в коллабораторах — это норма для публичного репозитория — форкни `dodobrands/ai-hub` и пришли PR из своего форка. Это стандартная опенсорс-модель fork-and-pull: чужой код изолирован и не выполняется в нашем CI, пока мейнтейнер его не одобрит.
+
+Из-за этой же изоляции CI на fork-PR не стартует сам — под проверками появляется кнопка **«Approve and run workflows»**, её нажимает мейнтейнер. Плюс проверка `path-resolution` фильтруется по путям (`buildin`/`kaiten`/`time`): если PR их не задевает, гейт просто не запускается — так и задумано.
 
 ## Лицензия
 

@@ -130,6 +130,11 @@ else:
         SPACE_ID="${2:-$DEFAULT_SPACE_ID}"
         [[ -z "$QUERY" ]] && { echo "Usage: search <query> [space_id]" >&2; exit 1; }
 
+        # UI Search API is a LAST RESORT: quality is poor (irrelevant/duplicated results) and
+        # it is scoped to one space. Prefer shadow-index + tree traversal (buildin-shadow.sh
+        # search / buildin-nav.sh children), or ask the user for the page URL/page_id.
+        echo "warning: UI search quality is low and space-scoped — prefer shadow-index/tree traversal or ask for the page URL." >&2
+
         # UI Search API (quality is poor — results are often irrelevant or duplicated)
         BODY=$(python3 -c "
 import json, sys

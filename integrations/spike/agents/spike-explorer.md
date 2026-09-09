@@ -91,4 +91,5 @@ After writing to file, return ONLY a brief status (5-7 lines):
 - Write detailed findings to the FILE, not to your response
 - Replace placeholder "_Ожидает исследования..._" with actual content
 - Use Edit tool to update the spike file
+- **Никаких голых `#N`/`PR #N` в spike-файле** — GitHub автолинкует их в issues репозитория артефакта (битые ссылки). PR — только полной ссылкой `[org/repo#N](https://github.com/org/repo/pull/N)`; не уверен в org/repo и номере — пиши текстом без ссылки. Цитаты commit message с `(#N)` — в бэктики.
 - Keep your response to orchestrator minimal

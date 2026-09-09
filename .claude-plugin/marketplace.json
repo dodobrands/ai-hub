@@ -9,13 +9,13 @@
     {
       "name": "spike",
       "description": "Spike research workflow — 3 specialized agents (explorer, researcher, architect) produce a structured report from a Kaiten card",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "author": {
         "name": "AI Hub Contributors"
       },
       "source": "./integrations/spike",
       "category": "automation",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/spike"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/spike"
     },
     {
       "name": "discovery",
@@ -26,7 +26,7 @@
       },
       "source": "./integrations/discovery",
       "category": "automation",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/discovery"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/discovery"
     },
     {
       "name": "kaiten",
@@ -37,7 +37,7 @@
       },
       "source": "./integrations/kaiten",
       "category": "productivity",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/kaiten"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/kaiten"
     },
     {
       "name": "time",
@@ -48,7 +48,7 @@
       },
       "source": "./integrations/time",
       "category": "productivity",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/time"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/time"
     },
     {
       "name": "buildin",
@@ -59,7 +59,7 @@
       },
       "source": "./integrations/buildin",
       "category": "productivity",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/buildin"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/buildin"
     },
     {
       "name": "holst",
@@ -70,7 +70,7 @@
       },
       "source": "./integrations/holst",
       "category": "productivity",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/holst"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/holst"
     },
     {
       "name": "genie",
@@ -81,7 +81,7 @@
       },
       "source": "./integrations/genie",
       "category": "productivity",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/genie"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/genie"
     },
     {
       "name": "reverse-product-analysis",
@@ -92,7 +92,7 @@
       },
       "source": "./integrations/reverse-product-analysis",
       "category": "development",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/reverse-product-analysis"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/reverse-product-analysis"
     },
     {
       "name": "test-factory",
@@ -103,7 +103,7 @@
       },
       "source": "./integrations/test-factory",
       "category": "development",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/test-factory"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/test-factory"
     },
     {
       "name": "hub-meta",
@@ -114,7 +114,7 @@
       },
       "source": "./integrations/hub-meta",
       "category": "development",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/hub-meta"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/hub-meta"
     },
     {
       "name": "code-review",
@@ -125,7 +125,7 @@
       },
       "source": "./integrations/code-review",
       "category": "development",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/code-review"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/code-review"
     },
     {
       "name": "testops",
@@ -136,7 +136,18 @@
       },
       "source": "./integrations/testops",
       "category": "productivity",
-      "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/testops"
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/testops"
+    },
+    {
+      "name": "spike-from-meeting",
+      "description": "Turn a meeting recording (video + transcript) into a markdown artifact with context-verified screenshots at timecodes — recap, spike, plan, instruction or dual-artifact. Supports Kontur.Talk API for auto-fetching transcript and video.",
+      "version": "0.3.1",
+      "author": {
+        "name": "AI Hub Contributors"
+      },
+      "source": "./integrations/spike-from-meeting",
+      "category": "automation",
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/spike-from-meeting"
     }
   ]
 }

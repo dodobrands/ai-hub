@@ -100,7 +100,7 @@ ln -sf ../integrations/<integration-name>/commands/<command-name>.md commands/<c
   },
   "source": "./integrations/<integration-name>",
   "category": "<automation|productivity|development>",
-  "homepage": "https://github.com/sagos95/ai-hub/tree/main/integrations/<integration-name>"
+  "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/<integration-name>"
 }
 ```
 

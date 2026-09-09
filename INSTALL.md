@@ -23,14 +23,14 @@ Choose a sensible install directory:
 ### Option A: `git` is available
 
 ```bash
-git clone https://github.com/sagos95/ai-hub.git
+git clone https://github.com/dodobrands/ai-hub.git
 cd ai-hub
 ```
 
 If you must install into the current empty directory instead of creating `ai-hub`, this is also valid:
 
 ```bash
-git clone https://github.com/sagos95/ai-hub.git .
+git clone https://github.com/dodobrands/ai-hub.git .
 ```
 
 ### Option B: `git` is missing
@@ -38,7 +38,7 @@ git clone https://github.com/sagos95/ai-hub.git .
 Download the zip archive over HTTPS and unpack it:
 
 ```bash
-curl -L https://github.com/sagos95/ai-hub/archive/refs/heads/main.zip -o ai-hub.zip
+curl -L https://github.com/dodobrands/ai-hub/archive/refs/heads/main.zip -o ai-hub.zip
 unzip -q ai-hub.zip
 cd ai-hub-main
 ```

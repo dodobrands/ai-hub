@@ -90,10 +90,30 @@ chmod +x integrations/kaiten/scripts/*.sh
 ### Блокеры
 
 ```bash
-./kaiten.sh POST "/cards/<card_id>/blockers" '{"reason": "Причина"}'
-./kaiten.sh GET "/cards/<card_id>/blockers"
-./kaiten.sh DELETE "/cards/<card_id>/blockers/<blocker_id>"
+./kaiten-cards.sh blockers <card_id>              # список блокировок
+./kaiten-cards.sh block <card_id> "Причина"       # текстовый блокер
+./kaiten-cards.sh block <card_id> --card <id>     # блок другой карточкой (зависимость)
+./kaiten-cards.sh unblock <card_id> <blocker_id>  # снять блокировку
 ```
+
+Два вида блокеров: текстовая причина (`reason`) или зависимость от другой карточки
+(`blocker_card_id`). `blocker_id` для снятия берётся из вывода `blockers`. Низкоуровнево
+то же доступно через `kaiten.sh` (`GET/POST/DELETE /cards/<id>/blockers[/<blocker_id>]`).
+
+### Планируемые связи (порядок работ)
+
+```bash
+./kaiten-cards.sh relations <card_id>              # предшественники/последователи карточки
+./kaiten-cards.sh relate <pred_id> <succ_id>       # pred идёт ПЕРЕД succ (тип end-start)
+./kaiten-cards.sh relate <pred_id> <succ_id> <type> # явный тип связи
+./kaiten-cards.sh unrelate <pred_id> <succ_id>     # удалить связь pred -> succ
+```
+
+Планируемая связь (`planned-relation`, тип `end-start`) задаёт **порядок работ**: предшественник
+идёт перед последователем. Это мягкая зависимость таймлайна, а не жёсткий блок (для жёсткого —
+`block`). **У обеих карточек должны быть плановые даты** (`planned_start`/`planned_end`) — иначе
+Kaiten отклонит связь; проставь их через `update` (политику дат-заглушек держи в
+скриптах-потребителях). Подробнее — [docs/KAITEN_API.md](./docs/KAITEN_API.md#card-planned-relations-планируемые-связи).
 
 ## API Reference
 
@@ -114,6 +134,12 @@ chmod +x integrations/kaiten/scripts/*.sh
 
 - 100 запросов в минуту
 - При превышении — HTTP 429
+- **Клиентский троттлинг** (opt-in): env `KAITEN_RATE=min|max` — пауза перед запросом. `max`=0.6с ≈100 req/мин (безопасно для bulk, соответствует лимиту); `min`=0.2с ≈300 req/мин — только для коротких серий, **не** для sustained-нагрузки. Дефолт — без паузы (интерактивные вызовы пейсятся сами).
+
+### Таймауты
+
+- Соединение — 10с (`--connect-timeout`), весь запрос — 30с (`--max-time`).
+- При таймауте/сетевой ошибке `kaiten.sh` завершается с ошибкой (`exit 1`), а не виснет.
 
 ## Troubleshooting
 
@@ -122,3 +148,4 @@ chmod +x integrations/kaiten/scripts/*.sh
 | 401 | Неверный или истёкший токен в `.env` |
 | 404 | Неверный домен или endpoint |
 | 429 | Превышен лимит запросов — подождите минуту |
+| `curl не смог выполнить …` | Таймаут (>30с) или нет соединения (>10с) — API недоступен/сеть; повторите |

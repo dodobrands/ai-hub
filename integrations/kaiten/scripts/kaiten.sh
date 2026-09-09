@@ -7,9 +7,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source hub-meta/scripts/load-env.sh from either marketplace layout
 # (<root>/integrations/<plugin>/scripts/) or Claude Code plugin cache
-# (<cache>/<marketplace>/<plugin>/<version>/scripts/, located via CLAUDE_PLUGIN_ROOT).
+# (<cache>/<marketplace>/<plugin>/<version>/scripts/, resolved by globbing the
+# sibling hub-meta versions and taking the highest, with $CLAUDE_PLUGIN_ROOT
+# as a last resort).
 _hub_load_env_sh="$SCRIPT_DIR/../../hub-meta/scripts/load-env.sh"
-[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
 [[ -f "$_hub_load_env_sh" ]] || { echo "Error: hub-meta/scripts/load-env.sh not found (marketplace and plugin-cache layouts checked)" >&2; exit 1; }
 # shellcheck source=../../hub-meta/scripts/load-env.sh
 source "$_hub_load_env_sh"
@@ -34,6 +37,11 @@ fi
 METHOD="${1:-GET}"
 ENDPOINT="${2:-/users/current}"
 BODY="$3"
+
+# Эндпоинт склеивается с базой как есть (${KAITEN_API}${ENDPOINT}), поэтому без ведущего
+# слэша получается ".../api/latestspaces" — Kaiten отвечает 401, и выглядит это как
+# «не хватает прав», хотя токен в порядке. Нормализуем, чтобы обе формы работали.
+[[ "$ENDPOINT" == /* ]] || ENDPOINT="/$ENDPOINT"
 
 # Access control levels (cumulative):
 #   1 | read                — GET/HEAD only
@@ -73,6 +81,10 @@ is_card_archive_operation() {
 # - Checklist item removal: /cards/{id}/checklists/{id}/items/{id}
 # - Card blocker removal: /cards/{id}/blockers/{id}
 # - Member removal from cards: /cards/{id}/members/{member_id}
+# - Planned relation removal: /cards/{id}/planned-relation/{target_card_id}
+#   (снимает planned-зависимость между карточками — обратимо через re-relate, не удаляет карточки)
+# - External link removal: /cards/{id}/external-links/{link_id}
+#   (снимает ссылку с карточки — сам адрес остаётся в истории карточки, вешается заново одним POST)
 is_safe_delete_operation() {
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/tags/[0-9]+$ ]]; then
         return 0
@@ -84,6 +96,12 @@ is_safe_delete_operation() {
         return 0
     fi
     if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/members/[0-9]+$ ]]; then
+        return 0
+    fi
+    if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/planned-relation/[0-9]+$ ]]; then
+        return 0
+    fi
+    if [[ "$ENDPOINT" =~ ^/cards/[0-9]+/external-links/[0-9]+$ ]]; then
         return 0
     fi
     return 1
@@ -124,8 +142,12 @@ case "$METHOD_UPPER" in
 esac
 
 # Build curl command
+# --connect-timeout / --max-time: без них зависший запрос висит бесконечно
+# (наблюдалось при bulk-прогонах). Ограничиваем время соединения и всего запроса.
 CURL_ARGS=(
     -s
+    --connect-timeout 10
+    --max-time 30
     -X "$METHOD_UPPER"
     -H "Authorization: Bearer $KAITEN_TOKEN"
     -H "Content-Type: application/json"
@@ -135,8 +157,25 @@ if [[ -n "$BODY" ]]; then
     CURL_ARGS+=(-d "$BODY")
 fi
 
-# Execute request
-response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${KAITEN_API}${ENDPOINT}")
+# Клиентский троттлинг (opt-in через env KAITEN_RATE): пауза ПЕРЕД запросом. Дефолт — без
+# паузы (интерактивные вызыватели пейсятся сами). max=0.6с ≈100 req/мин — безопасно для
+# bulk (соответствует лимиту Kaiten); min=0.2с ≈300 req/мин — ТОЛЬКО для коротких серий
+# (несколько вызовов), не для sustained-нагрузки.
+case "${KAITEN_RATE:-}" in
+    min) sleep 0.2 ;;
+    max) sleep 0.6 ;;
+esac
+
+# Execute request. `|| curl_rc=$?`: под `set -e` присваивание с упавшим $(...) прервало бы
+# скрипт на этой строке (тогда curl_rc=$? — мёртвый код) → ловим код, не роняя errexit.
+curl_rc=0
+response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${KAITEN_API}${ENDPOINT}") || curl_rc=$?
+
+# Таймаут/сетевая ошибка curl (напр. 28) → чёткая ошибка, а не пустой ответ с exit 0
+if [[ $curl_rc -ne 0 ]]; then
+    echo "Error: curl не смог выполнить ${METHOD_UPPER} ${ENDPOINT} (exit $curl_rc — таймаут/сеть)" >&2
+    exit 1
+fi
 
 # Extract HTTP code (last line)
 http_code=$(echo "$response" | tail -n1)

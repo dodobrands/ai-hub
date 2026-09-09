@@ -1,8 +1,0 @@
-{
-  "meta": {
-    "description": "Shadow index — local cache of Buildin page structure and summaries for fast search",
-    "root_page_id": "YOUR_ROOT_PAGE_ID",
-    "root_page_title": "Your Organization"
-  },
-  "pages": {}
-}

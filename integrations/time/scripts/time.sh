@@ -14,9 +14,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source hub-meta/scripts/load-env.sh from either marketplace layout
 # (<root>/integrations/<plugin>/scripts/) or Claude Code plugin cache
-# (<cache>/<marketplace>/<plugin>/<version>/scripts/, located via CLAUDE_PLUGIN_ROOT).
+# (<cache>/<marketplace>/<plugin>/<version>/scripts/, resolved by globbing the
+# sibling hub-meta versions and taking the highest, with $CLAUDE_PLUGIN_ROOT
+# as a last resort).
 _hub_load_env_sh="$SCRIPT_DIR/../../hub-meta/scripts/load-env.sh"
-[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | head -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
 [[ -f "$_hub_load_env_sh" ]] || { echo "Error: hub-meta/scripts/load-env.sh not found (marketplace and plugin-cache layouts checked)" >&2; exit 1; }
 # shellcheck source=../../hub-meta/scripts/load-env.sh
 source "$_hub_load_env_sh"
@@ -83,12 +86,17 @@ fi
 CURL_ARGS=(
     -s
     -w "\n%{http_code}"
-    -X "$METHOD"
     -H "Authorization: Bearer $AUTH_TOKEN"
-    -H "Content-Type: application/json"
 )
 
-[[ -n "$BODY" ]] && CURL_ARGS+=(-d "$BODY")
+# UPLOAD <endpoint> <filepath> — multipart file upload (e.g. /api/v4/files?channel_id=...)
+if [[ "$METHOD" == "UPLOAD" ]]; then
+    [[ -f "$BODY" ]] || { echo "Error: file not found: $BODY" >&2; exit 1; }
+    CURL_ARGS+=(-X POST -F "files=@$BODY")
+else
+    CURL_ARGS+=(-X "$METHOD" -H "Content-Type: application/json")
+    [[ -n "$BODY" ]] && CURL_ARGS+=(-d "$BODY")
+fi
 
 RESPONSE=$(curl "${CURL_ARGS[@]}" "${TIME_BASE_URL}${ENDPOINT}")
 

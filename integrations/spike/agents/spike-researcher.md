@@ -89,4 +89,5 @@ After writing to file, return ONLY a brief status (5-7 lines):
 - Replace placeholder "_Ожидает исследования..._" with actual content
 - Use Edit tool to update the spike file
 - Include working URLs to sources
+- **Никаких голых `#N`/`PR #N` в spike-файле** — GitHub автолинкует их в issues репозитория артефакта (битые ссылки). PR — только полной ссылкой `[org/repo#N](https://github.com/org/repo/pull/N)`; не уверен в org/repo и номере — пиши текстом без ссылки. Карточки Kaiten — только `[#id](https://YOUR_DOMAIN.kaiten.ru/space/YOUR_SPACE_ID/card/id)`.
 - Keep your response to orchestrator minimal

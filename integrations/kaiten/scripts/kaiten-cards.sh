@@ -37,7 +37,21 @@ Commands:
   
   tag <card_id> <tag_id>             - Добавить тег
   tags <card_id>                     - Получить теги
-  
+
+  blockers <card_id>                 - Получить блокировки карточки
+  block <card_id> <reason>           - Заблокировать (текстовая причина)
+  block <card_id> --card <blocker_card_id> [reason]
+                                       - Заблокировать другой карточкой (зависимость)
+  unblock <card_id> <blocker_id>     - Снять блокировку (blocker_id из blockers)
+
+  relations <card_id>                - Планируемые связи карточки (предшественники/последователи)
+  relate <predecessor_id> <successor_id> [type]
+                                       - Связать карточки: predecessor идёт ПЕРЕД successor
+                                         (planned-зависимость, type по умолчанию end-start).
+                                         У ОБЕИХ карточек должны быть planned_start/planned_end.
+  unrelate <predecessor_id> <successor_id>
+                                       - Удалить планируемую связь predecessor -> successor
+
   checklist <card_id> <name>         - Создать чек-лист
   checklists <card_id>               - Получить чек-листы
   check-item <card_id> <checklist_id> <text>  - Добавить пункт чек-листа
@@ -55,6 +69,13 @@ Examples:
   ./kaiten-cards.sh create 123 456 "Новая задача" "Описание" "5 SP" 42
   ./kaiten-cards.sh move 789 101
   ./kaiten-cards.sh comment 789 "Готово!"
+  ./kaiten-cards.sh blockers 789
+  ./kaiten-cards.sh block 789 "Ждём макеты"
+  ./kaiten-cards.sh block 789 --card 456
+  ./kaiten-cards.sh unblock 789 12345
+  ./kaiten-cards.sh relations 789
+  ./kaiten-cards.sh relate 456 789        # 456 идёт перед 789
+  ./kaiten-cards.sh unrelate 456 789
 EOF
 }
 
@@ -161,7 +182,23 @@ case "${1:-help}" in
         kaiten GET "/cards/$2/comments"
         ;;
     assign)
-        kaiten POST "/cards/$2/members" "{\"user_id\": $3, \"type\": 1}"
+        [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 assign <card_id> <user_id>" >&2; exit 1; }
+        # Числовые id: оба подставляются в endpoint И в тело — нечисловое значение иначе ломает путь
+        # или инъектит JSON. Валидируем + собираем тело через jq (как в block/create/comment).
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: card_id must be numeric, got '$2'" >&2; exit 1; }
+        [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: user_id must be numeric, got '$3'" >&2; exit 1; }
+        # «Ответственный» в Kaiten — участник карточки с type 2 (type 1 — обычный участник; именно
+        # type 2 попадает в фильтр responsible_ids). POST /members создаёт членство и ИГНОРИРУЕТ
+        # переданный type — роль поднимает только PATCH. Делаем оба шага, идемпотентно:
+        # POST может вернуть ошибку «уже участник» (членство уже есть) — не роняем на ней процесс,
+        # роль всё равно выставит PATCH ниже. stderr POST придерживаем: печатаем его, ТОЛЬКО если и
+        # PATCH упал (тогда POST-ошибка точнее про корень — неверный user_id / нет карточки, чем
+        # 404 от PATCH по несозданному членству); при успешном PATCH — молчим (идемпотентный путь).
+        post_err="$(kaiten POST "/cards/$2/members" "$(jq -n --argjson user_id "$3" '{user_id: $user_id}')" 2>&1 >/dev/null)" || true
+        if ! kaiten PATCH "/cards/$2/members/$3" "{\"type\": 2}"; then
+            [[ -n "$post_err" ]] && printf '%s\n' "$post_err" >&2
+            exit 1
+        fi
         ;;
     unassign)
         [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 unassign <card_id> <member_id>" >&2; exit 1; }
@@ -175,6 +212,61 @@ case "${1:-help}" in
         ;;
     tags)
         kaiten GET "/cards/$2/tags"
+        ;;
+    blockers)
+        [[ -z "$2" ]] && { echo "Usage: $0 blockers <card_id>" >&2; exit 1; }
+        kaiten GET "/cards/$2/blockers"
+        ;;
+    block)
+        # Два вида блокеров: текстовая причина или зависимость от другой карточки.
+        #   block <card_id> <reason>
+        #   block <card_id> --card <blocker_card_id> [reason]
+        [[ -z "$3" ]] && { echo "Usage: $0 block <card_id> <reason> | $0 block <card_id> --card <blocker_card_id> [reason]" >&2; exit 1; }
+        if [[ "$3" == "--card" ]]; then
+            [[ -z "$4" ]] && { echo "Usage: $0 block <card_id> --card <blocker_card_id> [reason]" >&2; exit 1; }
+            [[ "$4" =~ ^[0-9]+$ ]] || { echo "Error: blocker_card_id must be numeric, got '$4'" >&2; exit 1; }
+            # jq для безопасного экранирования (как в create/comment)
+            json_body=$(jq -n --argjson bc "$4" --arg reason "${5:-}" \
+                '{blocker_card_id: $bc} | if $reason != "" then . + {reason: $reason} else . end')
+        else
+            json_body=$(jq -n --arg reason "$3" '{reason: $reason}')
+        fi
+        kaiten POST "/cards/$2/blockers" "$json_body"
+        ;;
+    unblock)
+        [[ -z "$3" ]] && { echo "Usage: $0 unblock <card_id> <blocker_id>" >&2; exit 1; }
+        [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: blocker_id must be numeric, got '$3'" >&2; exit 1; }
+        kaiten DELETE "/cards/$2/blockers/$3"
+        ;;
+    relations)
+        # Планируемые связи (planned-зависимости, тип end-start) встроены в объект карточки:
+        # .plannedPredecessors — карточки, идущие ПЕРЕД этой; .plannedSuccessors — ПОСЛЕ.
+        # У элемента source_id = карточка-предшественник, target_id = карточка-последователь.
+        [[ -z "$2" ]] && { echo "Usage: $0 relations <card_id>" >&2; exit 1; }
+        kaiten GET "/cards/$2" | jq '{
+            plannedPredecessors: ((.plannedPredecessors // []) | map({source_id, target_id, type, title})),
+            plannedSuccessors:   ((.plannedSuccessors   // []) | map({source_id, target_id, type, title}))
+        }'
+        ;;
+    relate)
+        # Связать две карточки planned-зависимостью: predecessor идёт ПЕРЕД successor.
+        # POST /cards/{predecessor}/planned-relation {target_card_id: successor, type}.
+        # Kaiten требует у ОБЕИХ карточек planned_start/planned_end — иначе API вернёт ошибку
+        # (проставь даты через `update`; политику дат-заглушек держи в скиптах-потребителях).
+        [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 relate <predecessor_id> <successor_id> [type]" >&2; exit 1; }
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: predecessor_id must be numeric, got '$2'" >&2; exit 1; }
+        [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: successor_id must be numeric, got '$3'" >&2; exit 1; }
+        rel_type="${4:-end-start}"
+        json_body=$(jq -n --argjson target "$3" --arg type "$rel_type" '{target_card_id: $target, type: $type}')
+        kaiten POST "/cards/$2/planned-relation" "$json_body"
+        ;;
+    unrelate)
+        # Удалить planned-связь predecessor -> successor.
+        # DELETE /cards/{predecessor}/planned-relation/{successor}.
+        [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 unrelate <predecessor_id> <successor_id>" >&2; exit 1; }
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: predecessor_id must be numeric, got '$2'" >&2; exit 1; }
+        [[ "$3" =~ ^[0-9]+$ ]] || { echo "Error: successor_id must be numeric, got '$3'" >&2; exit 1; }
+        kaiten DELETE "/cards/$2/planned-relation/$3"
         ;;
     checklist)
         # Use jq for safe JSON escaping

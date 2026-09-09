@@ -112,7 +112,7 @@ Also write to section "## 9. Рекомендуемые действия" using 
 ## 9. Рекомендуемые действия
 
 - [ ] `[create-task]` Создать задачу на разработку: <краткое описание>
-- [ ] `[link-task]` Прилинковать карточку спайка к родительской задаче #<id>
+- [ ] `[link-task]` Прилинковать карточку спайка к родительской задаче [#<id>](https://YOUR_DOMAIN.kaiten.ru/space/YOUR_SPACE_ID/card/<id>)
 - [ ] `[human-review]` Артефакт спайка проверен человеком
 ```
 
@@ -145,4 +145,5 @@ After writing to file, return ONLY a brief status (7-10 lines). Include a one-li
 - Replace placeholder "_Ожидает анализа..._" with actual content
 - Use Edit tool to update the spike file
 - Provide ONE clear recommendation, not multiple equal options
+- **Никаких голых `#N`/`PR #N` в spike-файле** — GitHub автолинкует их в issues репозитория артефакта (битые ссылки). Карточки Kaiten — только `[#id](https://YOUR_DOMAIN.kaiten.ru/space/YOUR_SPACE_ID/card/id)`, PR — только `[org/repo#N](https://github.com/org/repo/pull/N)`.
 - Keep your response to orchestrator minimal

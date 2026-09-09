@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pull the latest sagos95/ai-hub into an existing subtree prefix and
+# Pull the latest dodobrands/ai-hub into an existing subtree prefix and
 # re-create any missing symlinks for newly added slash-commands.
 #
 # Run from the root of your overlay repo. If scripts/install-as-subtree.sh

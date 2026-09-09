@@ -1,0 +1,53 @@
+name: shell tests
+
+# Общий раннер shell/bats-тестов интеграций (без сети). Автообнаружение — новый тест-файл в
+# этих каталогах подхватывается сам, без правки workflow:
+#   - bats-юниты   integrations/**/tests/*.bats
+#   - gate-скрипты tests/*.sh, КРОМЕ path-resolution.sh (у него свой специализированный workflow
+#     path-resolution.yml — точечные paths-триггеры + матрица сценариев по типам потребления хаба).
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/**'
+      - 'tests/**'
+      - '.github/workflows/shell-tests.yml'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Гейты только читают репозиторий (checkout + локальные скрипты) — запись не нужна.
+permissions:
+  contents: read
+
+jobs:
+  shell-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Run bats unit tests
+        run: |
+          set -euo pipefail
+          mapfile -t bats_files < <(find integrations -path '*/tests/*.bats' | sort)
+          if [ "${#bats_files[@]}" -eq 0 ]; then
+            echo "нет .bats-тестов"
+          else
+            printf 'bats: %s\n' "${bats_files[@]}"
+            bats "${bats_files[@]}"
+          fi
+
+      - name: Run shell gate scripts
+        run: |
+          set -uo pipefail
+          failed=0
+          while IFS= read -r t; do
+            echo "::group::$t"
+            bash "$t" || failed=1
+            echo "::endgroup::"
+          done < <(find tests -maxdepth 1 -name '*.sh' ! -name 'path-resolution.sh' | sort)
+          exit $failed

@@ -132,9 +132,13 @@ TIME_AS=me ./time-channels.sh my-channels <team_id>
 
 # Поиск
 ./time-messages.sh search <team_id> "ключевое слово"
+./time-messages.sh search "ключевое слово"   # team_id берётся из $TIME_TEAM_ID в .env
 
 # Отправить сообщение
 ./time-messages.sh --as me send <channel_id> "Текст сообщения"
+
+# Отправить с вложением (--file можно повторять)
+./time-messages.sh --as me send <channel_id> "Текст" --file screenshot.png
 
 # Ответить в тред
 ./time-messages.sh --as bot send <channel_id> "Ответ" <root_post_id>

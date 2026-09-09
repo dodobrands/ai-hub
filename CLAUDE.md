@@ -39,7 +39,8 @@ bash integrations/hub-meta/scripts/setup.sh next
 │   ├── holst/                    # Инструменты для графических досок
 │   ├── kusto/                    # Azure Data Explorer (логи)     → README.md
 │   ├── hub-meta/                 # create-command, skill-retro
-│   └── code-review/              # Code review workflow
+│   ├── code-review/              # Code review workflow
+│   └── spike-from-meeting/       # Встреча (видео+транскрипт) → md-артефакт со скриншотами
 └── .env                          # Токены (не в git)
 ```
 
@@ -59,6 +60,7 @@ Claude Code CLI ищет slash-команды в `.claude/commands/`. Коман
   setup.md                       → ../../../integrations/hub-meta/commands/setup.md
   create-command.md              → ../../../integrations/hub-meta/commands/create-command.md
   spike.md                       → ../../../integrations/spike/commands/spike.md
+  spike-from-meeting.md          → ../../../integrations/spike-from-meeting/commands/spike-from-meeting.md
   ai-test.md                     → ../../../integrations/test-factory/commands/ai-test.md
   time-chat.md                   → ../../../integrations/time/commands/time-chat.md
   time-login.md                  → ../../../integrations/time/commands/time-login.md

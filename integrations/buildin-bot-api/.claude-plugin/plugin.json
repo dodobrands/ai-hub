@@ -1,6 +1,6 @@
 {
   "name": "buildin-bot-api",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Buildin.ai wiki — Official Bot API integration (read, write, search via api.buildin.ai/v1/)",
   "author": {
     "name": "AI Hub Contributors"

@@ -1,11 +1,11 @@
 {
   "name": "ai-hub",
-  "version": "1.13.0",
+  "version": "1.14.7",
   "description": "AI skills and integrations with Kaiten, Time, Buildin, Genie, Holst, Kusto, TestOps + automation workflows (spike research, product discovery, testing, code review)",
   "author": {
     "name": "sagos95"
   },
-  "repository": "https://github.com/sagos95/ai-hub",
+  "repository": "https://github.com/dodobrands/ai-hub",
   "license": "MIT",
   "keywords": [
     "kaiten",

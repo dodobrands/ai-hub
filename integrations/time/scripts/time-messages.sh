@@ -13,6 +13,14 @@ if [[ -f "$SIGNATURE_FILE" ]]; then
     TIME_SIGNATURE=$(cat "$SIGNATURE_FILE")
 fi
 
+# Best-effort load .env so optional defaults (e.g. $TIME_TEAM_ID for `search`) are available.
+# Non-fatal: explicit-arg forms work without it (auth itself is handled by the time.sh subprocess).
+_hub_load_env_sh="$SCRIPT_DIR/../../hub-meta/scripts/load-env.sh"
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+[[ -f "$_hub_load_env_sh" ]] && { source "$_hub_load_env_sh"; hub_load_env "$SCRIPT_DIR"; }
+unset _hub_load_env_sh
+
 # Pass through --as flag
 AS_ARGS=()
 if [[ "$1" == "--as" ]]; then
@@ -74,20 +82,35 @@ case "$action" in
         ;;
 
     send)
-        # Send message to channel
-        # Usage: ./time-messages.sh send <channel_id> <message> [root_id]
+        # Send message to channel, optionally with file attachments
+        # Usage: ./time-messages.sh send <channel_id> <message> [root_id] [--file <path>]...
         CHANNEL_ID="${2:?Channel ID required}"
         MESSAGE="${3:?Message required}"
-        ROOT_ID="${4}"
+        shift 3
+        ROOT_ID=""
+        FILE_PATHS=()
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --file) FILE_PATHS+=("${2:?--file requires a path}"); shift 2 ;;
+                *) ROOT_ID="$1"; shift ;;
+            esac
+        done
         MESSAGE="${MESSAGE}${TIME_SIGNATURE}"
 
-        ESCAPED_MESSAGE=$(echo "$MESSAGE" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip())[1:-1])')
+        FILE_IDS=()
+        for f in "${FILE_PATHS[@]}"; do
+            UPLOAD_RESP=$("$TIME" "${AS_ARGS[@]}" UPLOAD "/api/v4/files?channel_id=${CHANNEL_ID}" "$f")
+            FILE_IDS+=("$(echo "$UPLOAD_RESP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["file_infos"][0]["id"])')")
+        done
 
-        if [[ -n "$ROOT_ID" ]]; then
-            BODY="{\"channel_id\":\"$CHANNEL_ID\",\"message\":\"$ESCAPED_MESSAGE\",\"root_id\":\"$ROOT_ID\"}"
-        else
-            BODY="{\"channel_id\":\"$CHANNEL_ID\",\"message\":\"$ESCAPED_MESSAGE\"}"
-        fi
+        BODY=$(CHANNEL_ID="$CHANNEL_ID" ROOT_ID="$ROOT_ID" FILE_IDS="${FILE_IDS[*]}" python3 -c '
+import sys, os, json
+body = {"channel_id": os.environ["CHANNEL_ID"], "message": sys.stdin.read().strip()}
+if os.environ["ROOT_ID"]:
+    body["root_id"] = os.environ["ROOT_ID"]
+if os.environ["FILE_IDS"]:
+    body["file_ids"] = os.environ["FILE_IDS"].split()
+print(json.dumps(body))' <<< "$MESSAGE")
 
         "$TIME" "${AS_ARGS[@]}" POST "/api/v4/posts" "$BODY"
         ;;
@@ -95,9 +118,18 @@ case "$action" in
     search)
         # Search messages in team
         # Usage: ./time-messages.sh search <team_id> <terms> [is_or_search] [--resolve-users]
-        TEAM_ID="${2:?Team ID required}"
-        TERMS="${3:?Search terms required}"
-        IS_OR="${4:-false}"
+        #    or: ./time-messages.sh search <terms>   (team_id берётся из $TIME_TEAM_ID в .env)
+        if [[ -n "$3" ]]; then
+            # Explicit form (backward-compatible): <team_id> <terms> [is_or_search]
+            TEAM_ID="$2"
+            TERMS="$3"
+            IS_OR="${4:-false}"
+        else
+            # Short form: <terms>, team_id defaults from $TIME_TEAM_ID
+            TEAM_ID="${TIME_TEAM_ID:?Team ID required: передай <team_id> первым аргументом или задай TIME_TEAM_ID в .env}"
+            TERMS="${2:?Search terms required}"
+            IS_OR="false"
+        fi
 
         ESCAPED_TERMS=$(echo "$TERMS" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip())[1:-1])')
 

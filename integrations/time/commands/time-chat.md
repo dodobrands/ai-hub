@@ -129,6 +129,9 @@ chmod +x "$TIME_SCRIPTS"/*.sh
 
 # От бота — changelog, уведомление, результат автоматизации
 "$TIME_SCRIPTS/time-messages.sh" --as bot send <channel_id> "<message>" [root_id]
+
+# С вложениями (картинки/файлы) — --file можно повторять
+"$TIME_SCRIPTS/time-messages.sh" --as me send <channel_id> "<message>" --file /path/to/img.png [--file ...]
 ```
 ⚠️ **ОБЯЗАТЕЛЬНО** подтверди у пользователя: текст, адресата и режим (бот/личный).
 

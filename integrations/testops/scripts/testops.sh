@@ -8,12 +8,17 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# Резолвим .env: реальный корень git-репо (работает и в standalone, и когда
+# ai-hub подключён как subtree в overlay-репо), с fallback на subtree-корень
+# (../../..). Переопределяется через HUB_ENV_FILE.
+SUBTREE_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+ENV_FILE="${HUB_ENV_FILE:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$SUBTREE_ROOT")/.env}"
 
-# Load .env from repo root
-if [[ -f "$ROOT_DIR/.env" ]]; then
+# Load .env
+if [[ -f "$ENV_FILE" ]]; then
     set -a
-    source "$ROOT_DIR/.env"
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
     set +a
 fi
 

@@ -283,6 +283,12 @@ print(json.dumps({
         ;;
 
     search)
+        # Bot API POST /v1/search is broken server-side — it consistently returns HTTP 500.
+        # Guarded on purpose so callers don't waste turns on a dead endpoint. Read by
+        # page_id/URL (`read`/`get`), ask the user for the URL, or use the UI-API `buildin`
+        # integration (shadow-index + `buildin-nav children`) to locate a page_id.
+        echo "search: Bot API /v1/search is broken (HTTP 500) and disabled. Read by page_id/URL, ask the user for the URL, or use the UI-API buildin integration (shadow-index / buildin-nav children)." >&2
+        exit 2
         QUERY="$1"
         PAGE_SIZE="${2:-20}"
         [[ -z "$QUERY" ]] && { echo "Usage: search <query> [page_size]" >&2; exit 1; }

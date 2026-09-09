@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# Install sagos95/ai-hub as a git subtree inside your overlay repository.
+# Install dodobrands/ai-hub as a git subtree inside your overlay repository.
 #
 # Run this from the ROOT of your own git repo (e.g. your team overlay).
 # After installation, the generic AI Hub lives under <prefix>/ and can be
 # updated later with scripts/update-from-ai-hub.sh (or `make update-ai-hub`).
 #
 # Usage (one-liner, no local clone needed):
-#   curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/install-as-subtree.sh | bash
-#   curl -sL https://raw.githubusercontent.com/sagos95/ai-hub/main/scripts/install-as-subtree.sh | bash -s integrations/sagos95-ai-hub
+#   curl -sL https://raw.githubusercontent.com/dodobrands/ai-hub/main/scripts/install-as-subtree.sh | bash
+#   curl -sL https://raw.githubusercontent.com/dodobrands/ai-hub/main/scripts/install-as-subtree.sh | bash -s integrations/sagos95-ai-hub
 #
 # Or, with a local clone of this repo:
 #   ./scripts/install-as-subtree.sh [prefix]
 #
 # Env overrides:
 #   AI_HUB_REMOTE     — remote name (default: ai-hub)
-#   AI_HUB_URL        — remote URL (default: https://github.com/sagos95/ai-hub.git)
+#   AI_HUB_URL        — remote URL (default: https://github.com/dodobrands/ai-hub.git)
 #   AI_HUB_BRANCH     — branch (default: main)
 #   AI_HUB_NAMESPACE  — slash-command namespace for symlinks (default: ai-hub)
 #
@@ -23,7 +23,7 @@ set -euo pipefail
 
 PREFIX="${1:-integrations/sagos95-ai-hub}"
 REMOTE_NAME="${AI_HUB_REMOTE:-ai-hub}"
-REMOTE_URL="${AI_HUB_URL:-https://github.com/sagos95/ai-hub.git}"
+REMOTE_URL="${AI_HUB_URL:-https://github.com/dodobrands/ai-hub.git}"
 BRANCH="${AI_HUB_BRANCH:-main}"
 NAMESPACE="${AI_HUB_NAMESPACE:-ai-hub}"
 
@@ -172,7 +172,7 @@ seed_team_config "$PREFIX"
 cat <<EOF
 
 ================================================================
-Installed sagos95/ai-hub as subtree at: $PREFIX
+Installed dodobrands/ai-hub as subtree at: $PREFIX
 Slash-commands linked under .claude/commands/$NAMESPACE/
 Plugin registered in .claude/settings.json
 team-config.json seeded from example (if it didn't exist yet)
@@ -191,7 +191,7 @@ Optional:
 
 Update anytime via:
   /ai-hub:update-ai-hub                         (natural language also works:
-                                                 "обнови sagos95 инструменты")
+                                                 "обнови ai-hub инструменты")
   make update-ai-hub                            (if Makefile target added)
   ./$PREFIX/scripts/update-from-ai-hub.sh
 ================================================================
