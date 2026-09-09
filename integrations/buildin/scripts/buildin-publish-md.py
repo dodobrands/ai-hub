@@ -3,12 +3,15 @@
 Buildin page updater: delete all blocks and replace with markdown content.
 Usage: python3 buildin_publish.py <page_id> <markdown_file> [skip_h1]
 """
-import json, re, sys, uuid, time, os, urllib.request, urllib.error
+import json, re, sys, uuid, time, os, subprocess, urllib.request, urllib.error
 
 # ---- Config ----
 BUILDIN_BASE = "https://buildin.ai"
 SPACE_ID = "241db73f-2322-47e8-bbb5-11481aca3c40"
 BATCH_SIZE = 25  # blocks per append transaction
+API_TRIES = 4          # сетевые обрывы к buildin.ai не редкость
+API_TIMEOUT = 120
+API_BACKOFF = 4
 
 def load_token():
     env_path = os.path.expanduser("~/dodo/ai-hub/.env")
@@ -28,12 +31,21 @@ def api(method, endpoint, body=None, token=None):
     req.add_header("x-app-origin", "web")
     req.add_header("x-product", "buildin")
     req.add_header("app_version_name", "1.146.0")
-    try:
-        with urllib.request.urlopen(req) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        body_txt = e.read().decode()
-        raise RuntimeError(f"HTTP {e.code}: {body_txt[:300]}")
+    # Повторяем сетевые обрывы: публикация сначала удаляет блоки страницы, и
+    # если append упадёт на таймауте, страница останется разрушенной. HTTP-ошибку
+    # повторять нельзя — она про сам запрос, а не про сеть.
+    for attempt in range(API_TRIES):
+        try:
+            with urllib.request.urlopen(req, timeout=API_TIMEOUT) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            body_txt = e.read().decode()
+            raise RuntimeError(f"HTTP {e.code}: {body_txt[:300]}")
+        except Exception as e:
+            if attempt == API_TRIES - 1:
+                raise RuntimeError("сеть недоступна после %d попыток: %s: %s"
+                                   % (API_TRIES, type(e).__name__, e))
+            time.sleep(API_BACKOFF * (attempt + 1))
 
 def transaction(ops, token):
     body = {
@@ -208,44 +220,77 @@ def md_to_blocks(content, skip_h1=True):
 
     return blocks
 
+def _block_ops(block, parent_id, user_id, now, after=None):
+    """Операции на один блок и, рекурсивно, на его children.
+
+    Вложенные блоки обязательны для таблиц: md-to-blocks отдаёт таблицу (27) с
+    children-строками (28), и без их публикации на странице остаётся пустая
+    рамка. Порядок строк держится через after — без него строки перемешиваются.
+    """
+    bid = str(uuid.uuid4())
+    ops = [{
+        "id": bid,
+        "command": "set",
+        "table": "block",
+        "path": [],
+        "args": {
+            "uuid": bid,
+            "spaceId": SPACE_ID,
+            "parentId": parent_id,
+            "type": block["type"],
+            "textColor": "",
+            "backgroundColor": "",
+            "status": 1,
+            "permissions": [],
+            "createdAt": now,
+            "createdBy": user_id,
+            "updatedBy": user_id,
+            "updatedAt": now,
+            "data": {**{"pageFixedWidth": True, "format": {"commentAlignment": "top"}},
+                     **block["data"]}
+        }
+    }]
+    attach = {"uuid": bid}
+    if after:
+        attach["after"] = after
+    ops.append({"id": parent_id, "command": "listAfter", "table": "block",
+                "path": ["subNodes"], "args": attach})
+    prev = None
+    for child in block.get("children") or []:
+        child_ops, prev = _block_ops(child, bid, user_id, now, after=prev)
+        ops.extend(child_ops)
+    return ops, bid
+
+
 def append_blocks_batch(page_id, blocks, user_id, token):
     now = int(time.time() * 1000)
     ops = []
     for block in blocks:
-        bid = str(uuid.uuid4())
-        btype = block["type"]
-        bdata = block["data"]
-        ops.append({
-            "id": bid,
-            "command": "set",
-            "table": "block",
-            "path": [],
-            "args": {
-                "uuid": bid,
-                "spaceId": SPACE_ID,
-                "parentId": page_id,
-                "type": btype,
-                "textColor": "",
-                "backgroundColor": "",
-                "status": 1,
-                "permissions": [],
-                "createdAt": now,
-                "createdBy": user_id,
-                "updatedBy": user_id,
-                "updatedAt": now,
-                "data": {**{"pageFixedWidth": True, "format": {"commentAlignment": "top"}}, **bdata}
-            }
-        })
-        ops.append({
-            "id": page_id,
-            "command": "listAfter",
-            "table": "block",
-            "path": ["subNodes"],
-            "args": {"uuid": bid}
-        })
+        block_ops, _ = _block_ops(block, page_id, user_id, now)
+        ops.extend(block_ops)
     ops.append({"id": page_id, "command": "update", "table": "block", "path": [],
                 "args": {"updatedBy": user_id, "updatedAt": now}})
     transaction(ops, token)
+
+def convert_markdown(md_file, skip_h1=True):
+    """Разбор markdown внешним md-to-blocks.py, а не встроенным конвертером.
+
+    Встроенный md_to_blocks ниже — упрощённая копия: он не отдаёт children у
+    таблиц, поэтому таблицы публиковались пустой рамкой, и не знает про ширины
+    колонок, языки блоков кода и вложенность списков. Держать два конвертера
+    means держать два набора багов; внешний поддерживается и покрыт тестами.
+    """
+    conv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "md-to-blocks.py")
+    if not os.path.exists(conv):
+        raise RuntimeError("md-to-blocks.py рядом не найден: " + conv)
+    cmd = [sys.executable, conv, md_file]
+    if not skip_h1:
+        cmd.append("--shift-headings")
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        raise RuntimeError("md-to-blocks.py упал: " + (r.stderr or "")[:300])
+    return json.loads(r.stdout)
+
 
 def main():
     if len(sys.argv) < 3:
@@ -271,10 +316,9 @@ def main():
         print(f"  Done!")
 
     print(f"\nStep 3: Parse markdown {md_file}...")
-    with open(md_file) as f:
-        content = f.read()
-    blocks = md_to_blocks(content, skip_h1=skip_h1)
-    print(f"  Converted to {len(blocks)} blocks")
+    blocks = convert_markdown(md_file, skip_h1=skip_h1)
+    rows = sum(len(b.get("children") or []) for b in blocks)
+    print(f"  Converted to {len(blocks)} blocks ({rows} nested)")
 
     print(f"\nStep 4: Append {len(blocks)} blocks in batches of {BATCH_SIZE}...")
     for i in range(0, len(blocks), BATCH_SIZE):
