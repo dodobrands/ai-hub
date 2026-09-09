@@ -7,7 +7,11 @@ import json, re, sys, uuid, time, os, subprocess, urllib.request, urllib.error
 
 # ---- Config ----
 BUILDIN_BASE = "https://buildin.ai"
-SPACE_ID = "241db73f-2322-47e8-bbb5-11481aca3c40"
+# Пространство берётся у самой страницы (см. get_space_id в buildin-pages.sh).
+# Значение ниже — резерв для случая, когда страницу прочитать не удалось;
+# это пространство рабочей области Dodo, где живут отчёты.
+FALLBACK_SPACE_ID = "241db73f-2322-47e8-bbb5-11481aca3c40"
+SPACE_ID = FALLBACK_SPACE_ID
 BATCH_SIZE = 25  # blocks per append transaction
 API_TRIES = 4          # сетевые обрывы к buildin.ai не редкость
 API_TIMEOUT = 120
@@ -61,6 +65,14 @@ def transaction(ops, token):
 def get_user_id(token):
     me = api("GET", "/api/users/me", token=token)
     return me["data"]["uuid"]
+
+def resolve_space_id(page_id, token):
+    """spaceId целевой страницы. Хардкод опасен: блоки, созданные с чужим
+    spaceId, попадают не в то пространство и на странице не появляются."""
+    data = api("GET", f"/api/docs/{page_id}", token=token)
+    block = (data.get("data") or {}).get("blocks", {}).get(page_id) or {}
+    return block.get("spaceId") or FALLBACK_SPACE_ID
+
 
 def get_blocks_info(page_id, token):
     """Returns (all_block_ids, child_page_block_ids).
@@ -305,6 +317,11 @@ def main():
     token = load_token()
     user_id = get_user_id(token)
     print(f"User ID: {user_id[:8]}...")
+
+    global SPACE_ID
+    SPACE_ID = resolve_space_id(page_id, token)
+    if SPACE_ID != FALLBACK_SPACE_ID:
+        print(f"Space: {SPACE_ID}")
 
     print(f"\nStep 1: Get existing blocks...")
     delete_ids, child_ids = get_blocks_info(page_id, token)
