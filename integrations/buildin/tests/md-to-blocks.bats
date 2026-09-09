@@ -62,7 +62,7 @@ segments() {
     python3 "$SCRIPT" - | python3 "$SANDBOX/segments.py" "$1"
 }
 
-@test "перенесённый буллет остаётся одним пунктом, хвост клеится через пробел" {
+@test "wrapped bullet stays one item, tail joined with a space" {
     run summary <<'MD'
 - **Первый пункт:** начало пункта, которое не влезло в одну строку и поэтому
   продолжается с отступом в две позиции.
@@ -78,7 +78,7 @@ MD
     [[ "$output" != *" 1 "* ]]
 }
 
-@test "перенос в нумерованном пункте: один блок type 5" {
+@test "wrap inside a numbered item yields one type 5 block" {
     run summary <<'MD'
 1. Первый шаг, у которого описание не влезло в одну строку и
    поэтому продолжено с отступом.
@@ -91,7 +91,7 @@ MD
     [ "${lines[1]}" = "1 5 Второй шаг." ]
 }
 
-@test "перенос в todo-пункте: один блок type 3, checked сохраняется" {
+@test "wrap inside a todo item yields one type 3 block, checked preserved" {
     run summary <<'MD'
 - [x] Сделанная задача с длинным описанием, которое перенесено
       на следующую строку.
@@ -113,7 +113,7 @@ MD
     [ "$output" = "True" ]
 }
 
-@test "настоящая вложенность не ломается: маркер с отступом остаётся дочерним" {
+@test "real nesting survives: an indented marker stays a child" {
     run summary <<'MD'
 - Родительский пункт
   - Вложенный пункт
@@ -131,7 +131,7 @@ MD
     [ "${lines[4]}" = "1 4 Второй родительский пункт" ]
 }
 
-@test "вложенный пункт со своим переносом клеится к вложенному, не к родителю" {
+@test "a nested item wrapping joins the nested item, not the parent" {
     run summary <<'MD'
 - Родительский пункт
   - Вложенный пункт с описанием, которое не влезло
@@ -144,7 +144,7 @@ MD
     [ "${lines[1]}" = "0.0 4 Вложенный пункт с описанием, которое не влезло в одну строку." ]
 }
 
-@test "inline-разметка через стык переноса собирается в один сегмент" {
+@test "inline markup spanning the wrap collapses into one segment" {
     run segments 0 <<'MD'
 - начало **жирный
   текст** и `моно
@@ -162,7 +162,7 @@ MD
     [ "${lines[6]}" = "-  конец" ]
 }
 
-@test "абзац после списка через пустую строку остаётся отдельным параграфом" {
+@test "a paragraph after a blank line stays a separate paragraph" {
     run summary <<'MD'
 - Пункт списка с переносом, который
   продолжается ниже.
@@ -176,7 +176,7 @@ MD
     [ "${lines[1]}" = "1 1 Это уже обычный абзац, а не продолжение пункта." ]
 }
 
-@test "другие конструкции после переноса не всасываются в пункт" {
+@test "other constructs after a wrap are not swallowed into the item" {
     run summary <<'MD'
 - Пункт с переносом, который
   продолжается ниже.
@@ -190,7 +190,7 @@ MD
     [ "${lines[1]}" = "1 27 " ]
 }
 
-@test "выноска: каждая строка > остаётся отдельной строкой (поведение не менялось)" {
+@test "blockquote: every > line stays its own line (behaviour unchanged)" {
     cat > "$SANDBOX/callout.md" <<'MD'
 > **Источник:** запись встречи
 > **Участники:** трое
@@ -207,7 +207,7 @@ print(json.dumps(\"\".join(s[\"text\"] for s in block[\"data\"][\"segments\"]), 
     [[ "${lines[1]}" == *'\n'* ]]
 }
 
-@test "граница: хвост БЕЗ отступа не приклеивается (истинный lazy continuation не поддержан)" {
+@test "boundary: an unindented tail does not join (true lazy continuation unsupported)" {
     # CommonMark склеил бы и такую строку, но здесь она осознанно оставлена
     # отдельным параграфом: без отступа неотличимо от начала нового абзаца.
     run summary <<'MD'
