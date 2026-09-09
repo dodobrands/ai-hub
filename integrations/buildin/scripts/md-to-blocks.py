@@ -197,6 +197,45 @@ def code_data(lang, body):
     return {"language": None, "format": fmt, "segments": seg}
 
 
+# Ширина колонки в px: Buildin не подгоняет её под содержимое, поэтому
+# считаем сами по самой длинной ячейке. Коэффициенты снятыми замерами по
+# отрендеренной странице: 26 px отступов плюс 8.4 px на символ, обрезка длины
+# на 88 символах — дальше колонка всё равно переносит текст.
+COL_MIN_WIDTH = 120
+COL_MAX_WIDTH = 620
+TABLE_WIDTH_BUDGET = 1240   # ширина контента страницы при pageFixedWidth: false
+
+
+def column_widths(rows, ncols):
+    """Ширины колонок, уложенные в бюджет страницы."""
+    w = []
+    for c in range(ncols):
+        longest = max((len(r[c]) if c < len(r) else 0) for r in rows) if rows else 0
+        raw = round(26 + 8.4 * min(longest, 88))
+        w.append(max(COL_MIN_WIDTH, min(COL_MAX_WIDTH, raw)))
+
+    # Сжимать можно только то, что выше минимума: если сжать пропорционально
+    # и потом поднять узкие колонки до минимума, сумма снова выйдет за бюджет.
+    for _ in range(20):
+        if sum(w) <= TABLE_WIDTH_BUDGET:
+            break
+        flex = [x - COL_MIN_WIDTH if x > COL_MIN_WIDTH else 0 for x in w]
+        flex_sum = sum(flex)
+        if not flex_sum:
+            break                      # все колонки на минимуме — сжимать нечего
+        excess = sum(w) - TABLE_WIDTH_BUDGET
+        w = [max(COL_MIN_WIDTH, round(x - excess * f / flex_sum)) if f else x
+             for x, f in zip(w, flex)]
+
+    # Округление по колонкам даёт ±1 px, и сумма выходит за бюджет на единицу.
+    over = sum(w) - TABLE_WIDTH_BUDGET
+    if over > 0:
+        widest = max(range(len(w)), key=lambda i: w[i])
+        if w[widest] - over >= COL_MIN_WIDTH:
+            w[widest] -= over
+    return w
+
+
 def parse_table(lines, start):
     """Markdown pipe-таблица → блок table (27) с children-строками (28)."""
     table_lines = []
@@ -220,12 +259,17 @@ def parse_table(lines, start):
         r = r + [""] * (ncols - len(r))
         cp = {col_ids[ci]: parse_inline(cell) for ci, cell in enumerate(r)}
         children.append({"type": 28, "data": {"collectionProperties": cp}})
+    widths = column_widths(rows, ncols)
     table = {
         "type": 27,
         "data": {"segments": [], "format": {
             "commentAlignment": "top",
             "tableBlockRowHeader": True,
+            "tableBlockRanges": [],
             "tableBlockColumnOrder": col_ids,
+            "tableBlockColumnFormat": {
+                cid: {"width": widths[ci]} for ci, cid in enumerate(col_ids)
+            },
         }},
         "children": children,
     }
