@@ -36,6 +36,10 @@ integrations/buildin/.cache/
 # Setup state (per-install progress markers, no secrets)
 integrations/hub-meta/.setup-state
 
+# Конфиг команды — живёт в overlay-репозитории потребителя, а не в публичном ai-hub
+team-config.json
+!team-config.example.json
+
 # Node.js
 node_modules/
 
