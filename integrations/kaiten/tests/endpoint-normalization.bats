@@ -36,26 +36,26 @@ teardown() {
     rm -rf "$SANDBOX"
 }
 
-@test "эндпоинт со слэшем: URL склеивается как есть" {
+@test "endpoint with a leading slash: URL is joined as-is" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh" GET /spaces
     [ "$status" -eq 0 ]
     [[ "$output" == *"https://example.invalid/api/latest/spaces"* ]]
 }
 
-@test "эндпоинт без слэша: слэш добавляется, а не съедается" {
+@test "endpoint without a slash: the slash is added, not swallowed" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh" GET spaces
     [ "$status" -eq 0 ]
     [[ "$output" == *"https://example.invalid/api/latest/spaces"* ]]
     [[ "$output" != *"latestspaces"* ]]
 }
 
-@test "вложенный путь без слэша тоже нормализуется" {
+@test "a nested path without a slash is normalized too" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh" GET cards/42
     [ "$status" -eq 0 ]
     [[ "$output" == *"https://example.invalid/api/latest/cards/42"* ]]
 }
 
-@test "дефолтный эндпоинт остаётся /users/current" {
+@test "the default endpoint stays /users/current" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh"
     [ "$status" -eq 0 ]
     [[ "$output" == *"https://example.invalid/api/latest/users/current"* ]]
