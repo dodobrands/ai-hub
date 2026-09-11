@@ -63,6 +63,19 @@ CODE_LANG_DISPLAY = {
 }
 
 
+def _nested(inner, enhancer_key):
+    """Разобрать содержимое жирного или курсивного участка и навесить оформление
+    на каждый вложенный сегмент, сохранив код и ссылки внутри."""
+    out = []
+    for seg in parse_inline(inner):
+        enh = dict(seg.get("enhancer") or {})
+        enh[enhancer_key] = True
+        seg = dict(seg)
+        seg["enhancer"] = enh
+        out.append(seg)
+    return out
+
+
 def parse_inline(text):
     """Текст с inline-разметкой → список сегментов Buildin."""
     if not text:
@@ -79,9 +92,12 @@ def parse_inline(text):
             if lp:
                 segments.append({"type": 3, "text": lp.group(1), "url": lp.group(2), "enhancer": {}})
         elif m.group("bold"):
-            segments.append({"type": 0, "text": m.group("bold")[2:-2], "enhancer": {"bold": True}})
+            # Внутри жирного может быть код или ссылка: **28 у `staff`**. Без
+            # рекурсии бэктики остаются в тексте буквально и попадают на
+            # страницу как разметка.
+            segments.extend(_nested(m.group("bold")[2:-2], "bold"))
         elif m.group("italic"):
-            segments.append({"type": 0, "text": m.group("italic")[1:-1], "enhancer": {"italic": True}})
+            segments.extend(_nested(m.group("italic")[1:-1], "italic"))
         pos = m.end()
     if pos < len(text):
         segments.append({"type": 0, "text": text[pos:], "enhancer": {}})
