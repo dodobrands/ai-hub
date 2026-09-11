@@ -6,7 +6,7 @@
 полем "children" — их создаёт buildin-blocks.py с правильными parentId/subNodes.
 
 Usage:
-    md-to-blocks.py <markdown_file> [--shift-headings] [--skip-h1] > blocks.json
+    md-to-blocks.py <markdown_file> [--shift-headings] > blocks.json
     cat doc.md | md-to-blocks.py - [--shift-headings] > blocks.json
 
 Поддержка Markdown:
@@ -53,11 +53,6 @@ LINK_PARTS = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 # Известные языки кода → отображаемое имя в format.language (как делает Buildin).
 CODE_LANG_DISPLAY = {
-    # Встречается в отчётах по нагрузочным тестам и инфраструктурных заметках.
-    "kql": "Plain Text", "kusto": "Plain Text", "promql": "Plain Text",
-    "jsonnet": "Plain Text", "libsonnet": "Plain Text",
-    "hcl": "Plain Text", "terraform": "Plain Text", "ini": "Plain Text",
-    "cs": "C#", "csharp": "C#", "py": "Python",
     "mermaid": "Mermaid", "json": "JSON", "swift": "Swift", "python": "Python",
     "bash": "Bash", "shell": "Shell", "sh": "Shell", "js": "JavaScript",
     "javascript": "JavaScript", "ts": "TypeScript", "typescript": "TypeScript",
@@ -214,10 +209,7 @@ def code_data(lang, body):
         fmt["language"] = "Mermaid"
         fmt["codePreviewFormat"] = "preview"
     elif low:
-        # Неизвестный язык отдаём как Plain Text: значение вроде "Kql" или
-        # "Promql" Buildin не знает, и подсветка пропадает молча — блок
-        # выглядит обычным текстом, а причину по странице не увидеть.
-        fmt["language"] = CODE_LANG_DISPLAY.get(low, "Plain Text")
+        fmt["language"] = CODE_LANG_DISPLAY.get(low, lang.strip().capitalize())
     return {"language": None, "format": fmt, "segments": seg}
 
 
@@ -307,8 +299,7 @@ def heading_level(hashes, shift):
     return n
 
 
-def parse_md(md, shift=False, skip_h1=False):
-    """skip_h1 выбрасывает H1 — он дублирует заголовок самой страницы."""
+def parse_md(md, shift=False):
     """Markdown → плоский список блоков (с пометкой collapse у заголовков)."""
     blocks = []
     lines = md.split("\n")
@@ -347,9 +338,6 @@ def parse_md(md, shift=False, skip_h1=False):
         # Заголовок
         mh = re.match(r"^(#{1,6})\s+(.+)$", line)
         if mh:
-            if skip_h1 and len(mh.group(1)) == 1:
-                i += 1
-                continue
             level = heading_level(mh.group(1), shift)
             blocks.append({
                 "type": 7,
@@ -452,12 +440,11 @@ def _clean(b):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     shift = "--shift-headings" in sys.argv
-    skip_h1 = "--skip-h1" in sys.argv
     if not args:
         print("Usage: md-to-blocks.py <markdown_file|-> [--shift-headings]", file=sys.stderr)
         sys.exit(1)
     src = sys.stdin.read() if args[0] == "-" else open(args[0], encoding="utf-8").read()
-    blocks = group_collapses(parse_md(src, shift=shift, skip_h1=skip_h1))
+    blocks = group_collapses(parse_md(src, shift=shift))
     print(json.dumps(blocks, ensure_ascii=False, indent=2))
 
 

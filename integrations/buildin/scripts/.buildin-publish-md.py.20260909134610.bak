@@ -3,58 +3,20 @@
 Buildin page updater: delete all blocks and replace with markdown content.
 Usage: python3 buildin_publish.py <page_id> <markdown_file> [skip_h1]
 """
-import json, re, sys, uuid, time, os, subprocess, urllib.request, urllib.error
+import json, re, sys, uuid, time, os, urllib.request, urllib.error
 
 # ---- Config ----
 BUILDIN_BASE = "https://buildin.ai"
-# Пространство берётся у самой страницы (см. get_space_id в buildin-pages.sh).
-# Значение ниже — резерв для случая, когда страницу прочитать не удалось;
-# это пространство рабочей области Dodo, где живут отчёты.
-FALLBACK_SPACE_ID = "241db73f-2322-47e8-bbb5-11481aca3c40"
-SPACE_ID = FALLBACK_SPACE_ID
+SPACE_ID = "241db73f-2322-47e8-bbb5-11481aca3c40"
 BATCH_SIZE = 25  # blocks per append transaction
-API_TRIES = 4          # сетевые обрывы к buildin.ai не редкость
-API_TIMEOUT = 120
-API_BACKOFF = 4
-
-def _env_candidates():
-    """Где искать .env — порядок из hub-meta/scripts/load-env.sh.
-
-    Жёсткий путь ~/dodo/ai-hub/.env работает только у клона репозитория. При
-    установке плагином такого каталога нет, и публикация падала бы на старте.
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    # вверх от скрипта до ближайшего .env: в клоне это корень репозитория
-    d = here
-    for _ in range(6):
-        yield os.path.join(d, ".env")
-        parent = os.path.dirname(d)
-        if parent == d:
-            break
-        d = parent
-    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    yield os.path.join(xdg, "ai-hub", ".env")
-    yield os.path.expanduser("~/.ai-hub/.env")
-    yield os.path.expanduser("~/.claude/plugins/cache/ai-hub/.env")
-    yield os.path.expanduser("~/dodo/ai-hub/.env")
-
-
-def _read_token(name="BUILDIN_UI_TOKEN"):
-    seen = []
-    for path in _env_candidates():
-        if path in seen or not os.path.exists(path):
-            continue
-        seen.append(path)
-        for line in open(path, encoding="utf-8"):
-            if line.startswith(name + "="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise RuntimeError(
-        "%s не найден. Искал в: %s. Обновите токен через buildin-login.sh"
-        % (name, ", ".join(seen) or "нигде — ни один .env не существует"))
-
 
 def load_token():
-    return _read_token()
+    env_path = os.path.expanduser("~/dodo/ai-hub/.env")
+    with open(env_path) as f:
+        for line in f:
+            if line.startswith("BUILDIN_UI_TOKEN="):
+                return line.strip().split("=", 1)[1]
+    raise RuntimeError("BUILDIN_UI_TOKEN not found in .env")
 
 def api(method, endpoint, body=None, token=None):
     url = BUILDIN_BASE + endpoint
@@ -66,21 +28,12 @@ def api(method, endpoint, body=None, token=None):
     req.add_header("x-app-origin", "web")
     req.add_header("x-product", "buildin")
     req.add_header("app_version_name", "1.146.0")
-    # Повторяем сетевые обрывы: публикация сначала удаляет блоки страницы, и
-    # если append упадёт на таймауте, страница останется разрушенной. HTTP-ошибку
-    # повторять нельзя — она про сам запрос, а не про сеть.
-    for attempt in range(API_TRIES):
-        try:
-            with urllib.request.urlopen(req, timeout=API_TIMEOUT) as r:
-                return json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            body_txt = e.read().decode()
-            raise RuntimeError(f"HTTP {e.code}: {body_txt[:300]}")
-        except Exception as e:
-            if attempt == API_TRIES - 1:
-                raise RuntimeError("сеть недоступна после %d попыток: %s: %s"
-                                   % (API_TRIES, type(e).__name__, e))
-            time.sleep(API_BACKOFF * (attempt + 1))
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body_txt = e.read().decode()
+        raise RuntimeError(f"HTTP {e.code}: {body_txt[:300]}")
 
 def transaction(ops, token):
     body = {
@@ -96,14 +49,6 @@ def transaction(ops, token):
 def get_user_id(token):
     me = api("GET", "/api/users/me", token=token)
     return me["data"]["uuid"]
-
-def resolve_space_id(page_id, token):
-    """spaceId целевой страницы. Хардкод опасен: блоки, созданные с чужим
-    spaceId, попадают не в то пространство и на странице не появляются."""
-    data = api("GET", f"/api/docs/{page_id}", token=token)
-    block = (data.get("data") or {}).get("blocks", {}).get(page_id) or {}
-    return block.get("spaceId") or FALLBACK_SPACE_ID
-
 
 def get_blocks_info(page_id, token):
     """Returns (all_block_ids, child_page_block_ids).
@@ -263,80 +208,44 @@ def md_to_blocks(content, skip_h1=True):
 
     return blocks
 
-def _block_ops(block, parent_id, user_id, now, after=None):
-    """Операции на один блок и, рекурсивно, на его children.
-
-    Вложенные блоки обязательны для таблиц: md-to-blocks отдаёт таблицу (27) с
-    children-строками (28), и без их публикации на странице остаётся пустая
-    рамка. Порядок строк держится через after — без него строки перемешиваются.
-    """
-    bid = str(uuid.uuid4())
-    ops = [{
-        "id": bid,
-        "command": "set",
-        "table": "block",
-        "path": [],
-        "args": {
-            "uuid": bid,
-            "spaceId": SPACE_ID,
-            "parentId": parent_id,
-            "type": block["type"],
-            "textColor": "",
-            "backgroundColor": "",
-            "status": 1,
-            "permissions": [],
-            "createdAt": now,
-            "createdBy": user_id,
-            "updatedBy": user_id,
-            "updatedAt": now,
-            "data": {**{"pageFixedWidth": True, "format": {"commentAlignment": "top"}},
-                     **block["data"]}
-        }
-    }]
-    attach = {"uuid": bid}
-    if after:
-        attach["after"] = after
-    ops.append({"id": parent_id, "command": "listAfter", "table": "block",
-                "path": ["subNodes"], "args": attach})
-    prev = None
-    for child in block.get("children") or []:
-        child_ops, prev = _block_ops(child, bid, user_id, now, after=prev)
-        ops.extend(child_ops)
-    return ops, bid
-
-
 def append_blocks_batch(page_id, blocks, user_id, token):
     now = int(time.time() * 1000)
     ops = []
     for block in blocks:
-        block_ops, _ = _block_ops(block, page_id, user_id, now)
-        ops.extend(block_ops)
+        bid = str(uuid.uuid4())
+        btype = block["type"]
+        bdata = block["data"]
+        ops.append({
+            "id": bid,
+            "command": "set",
+            "table": "block",
+            "path": [],
+            "args": {
+                "uuid": bid,
+                "spaceId": SPACE_ID,
+                "parentId": page_id,
+                "type": btype,
+                "textColor": "",
+                "backgroundColor": "",
+                "status": 1,
+                "permissions": [],
+                "createdAt": now,
+                "createdBy": user_id,
+                "updatedBy": user_id,
+                "updatedAt": now,
+                "data": {**{"pageFixedWidth": True, "format": {"commentAlignment": "top"}}, **bdata}
+            }
+        })
+        ops.append({
+            "id": page_id,
+            "command": "listAfter",
+            "table": "block",
+            "path": ["subNodes"],
+            "args": {"uuid": bid}
+        })
     ops.append({"id": page_id, "command": "update", "table": "block", "path": [],
                 "args": {"updatedBy": user_id, "updatedAt": now}})
     transaction(ops, token)
-
-def convert_markdown(md_file, skip_h1=True):
-    """Разбор markdown внешним md-to-blocks.py, а не встроенным конвертером.
-
-    Встроенный md_to_blocks ниже — упрощённая копия: он не отдаёт children у
-    таблиц, поэтому таблицы публиковались пустой рамкой, и не знает про ширины
-    колонок, языки блоков кода и вложенность списков. Держать два конвертера
-    means держать два набора багов; внешний поддерживается и покрыт тестами.
-    """
-    conv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "md-to-blocks.py")
-    if not os.path.exists(conv):
-        raise RuntimeError("md-to-blocks.py рядом не найден: " + conv)
-    cmd = [sys.executable, conv, md_file]
-    if skip_h1:
-        # H1 — заголовок самой страницы; блоком на странице он лишний.
-        # Раньше сюда передавался --shift-headings, но это другая операция:
-        # она сдвигает уровни, а H1 всё равно оставался блоком.
-        cmd.append("--skip-h1")
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if r.returncode != 0:
-        raise RuntimeError("md-to-blocks.py упал: " + (r.stderr or "")[:300])
-    return json.loads(r.stdout)
-
 
 def main():
     if len(sys.argv) < 3:
@@ -352,11 +261,6 @@ def main():
     user_id = get_user_id(token)
     print(f"User ID: {user_id[:8]}...")
 
-    global SPACE_ID
-    SPACE_ID = resolve_space_id(page_id, token)
-    if SPACE_ID != FALLBACK_SPACE_ID:
-        print(f"Space: {SPACE_ID}")
-
     print(f"\nStep 1: Get existing blocks...")
     delete_ids, child_ids = get_blocks_info(page_id, token)
     print(f"  Found {len(delete_ids)} blocks to delete, {len(child_ids)} child page(s) to preserve")
@@ -367,9 +271,10 @@ def main():
         print(f"  Done!")
 
     print(f"\nStep 3: Parse markdown {md_file}...")
-    blocks = convert_markdown(md_file, skip_h1=skip_h1)
-    rows = sum(len(b.get("children") or []) for b in blocks)
-    print(f"  Converted to {len(blocks)} blocks ({rows} nested)")
+    with open(md_file) as f:
+        content = f.read()
+    blocks = md_to_blocks(content, skip_h1=skip_h1)
+    print(f"  Converted to {len(blocks)} blocks")
 
     print(f"\nStep 4: Append {len(blocks)} blocks in batches of {BATCH_SIZE}...")
     for i in range(0, len(blocks), BATCH_SIZE):
