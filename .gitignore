@@ -51,3 +51,7 @@ Temp/
 
 # Shadow-индекс Buildin — локальный кеш структуры вики, у каждого свой
 integrations/buildin/shadow-index.json
+
+# Побочный продукт запуска python-скриптов из каталога интеграции.
+__pycache__/
+*.pyc
