@@ -62,6 +62,21 @@ segments() {
     python3 "$SCRIPT" - | python3 "$SANDBOX/segments.py" "$1"
 }
 
+# markdown со stdin → плоский слепок, конвертер с --skip-h1
+summary_skip_h1() {
+    python3 "$SCRIPT" - --skip-h1 | python3 "$SANDBOX/summary.py"
+}
+
+# markdown со stdin → ширины колонок первой таблицы, по порядку колонок
+widths() {
+    python3 "$SCRIPT" - | python3 -c '
+import json, sys
+fmt = json.load(sys.stdin)[0]["data"]["format"]
+cw = fmt["tableBlockColumnFormat"]
+print(" ".join(str(cw[c]["width"]) for c in fmt["tableBlockColumnOrder"]))
+'
+}
+
 @test "wrapped bullet stays one item, tail joined with a space" {
     run summary <<'MD'
 - **Первый пункт:** начало пункта, которое не влезло в одну строку и поэтому
@@ -218,4 +233,55 @@ MD
     [ "$status" -eq 0 ]
     [ "${lines[0]}" = "0 4 Пункт списка, продолжение которого" ]
     [ "${lines[1]}" = "1 1 не имеет отступа вообще." ]
+}
+
+# --skip-h1 снимает заголовок страницы, дублирующий её имя, а не размечает
+# документ. H1 ниже по тексту — уже осмысленный раздел, и он должен уцелеть.
+@test "skip-h1 drops the leading H1 only, later H1 survives" {
+    run summary_skip_h1 <<'MD'
+# Имя страницы
+
+Вступление.
+
+# Раздел первого уровня
+
+Тело раздела.
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 3 ]
+    [ "${lines[0]}" = "0 1 Вступление." ]
+    [ "${lines[1]}" = "1 7 Раздел первого уровня" ]
+    [ "${lines[2]}" = "2 1 Тело раздела." ]
+}
+
+@test "skip-h1 keeps an H1 that does not lead the document" {
+    run summary_skip_h1 <<'MD'
+Абзац раньше заголовка.
+
+# Не заголовок страницы
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[1]}" = "1 7 Не заголовок страницы" ]
+}
+
+# Ширина считается по отрендеренному тексту: подпись ссылки занимает место,
+# а URL — нет. Иначе колонка со ссылками съедает бюджет, а содержательные
+# колонки прижимаются к минимуму — ровно наоборот тому, что нужно.
+@test "column width follows visible text, not markdown source" {
+    run widths <<'MD'
+| Ссылка | Описание работы |
+|---|---|
+| [акт](https://example.com/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/11112222-3333) | коротко |
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    link_w=$(echo "$output" | cut -d' ' -f1)
+    text_w=$(echo "$output" | cut -d' ' -f2)
+    # "Описание работы" (15) длиннее, чем "Ссылка" (6) и подпись "акт" (3)
+    [ "$text_w" -gt "$link_w" ]
+    # и колонка со ссылкой не должна упираться в максимум из-за длины URL
+    [ "$link_w" -lt 620 ]
 }

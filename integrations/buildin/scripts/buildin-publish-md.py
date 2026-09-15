@@ -3,8 +3,9 @@
 
 Движок команды `buildin-pages.sh publish-md`; вызывать напрямую тоже можно.
 Разбор markdown делает md-to-blocks.py, сборку операций — buildin-blocks.py;
-здесь остаётся то, чего нет в shell-пути: ретраи сетевых обрывов, батчи,
-сохранение дочерних страниц при замене и поиск .env без hub-meta.
+здесь остаётся то, чего нет в shell-пути: ретраи обрывов и транзиентных
+ответов сервера, батчи, безопасный порядок замены (сначала залить, потом
+удалить), сохранение дочерних страниц и поиск .env без hub-meta.
 
 Usage: buildin-publish-md.py <page_id|url> <file.md> [--append|--replace] [--skip-h1|--keep-h1]
 """
@@ -12,15 +13,15 @@ import json, re, sys, uuid, time, os, subprocess, urllib.request, urllib.error
 
 # ---- Config ----
 BUILDIN_BASE = "https://buildin.ai"
-# Пространство берётся у самой страницы (см. get_space_id в buildin-pages.sh).
-# Значение ниже — резерв для случая, когда страницу прочитать не удалось;
-# это пространство рабочей области Dodo, где живут отчёты.
-FALLBACK_SPACE_ID = "241db73f-2322-47e8-bbb5-11481aca3c40"
-SPACE_ID = FALLBACK_SPACE_ID
+# Пространство берётся у самой страницы (см. get_space_id в buildin-pages.sh);
+# резервного значения нет намеренно — см. resolve_space_id.
+SPACE_ID = None
 BATCH_SIZE = 25  # blocks per append transaction
 API_TRIES = 4          # сетевые обрывы к buildin.ai не редкость
 API_TIMEOUT = 120
 API_BACKOFF = 4
+# Транзиентные статусы: их повтор имеет смысл, прочие 4xx — про сам запрос.
+API_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 
 def _env_candidates():
     """Где искать .env — порядок из hub-meta/scripts/load-env.sh.
@@ -61,6 +62,15 @@ def _read_token(name="BUILDIN_UI_TOKEN"):
 def load_token():
     return _read_token()
 
+def _retry_delay(err, attempt):
+    """Retry-After сервера важнее нашего backoff — при 429 он и есть ответ
+    на вопрос «сколько ждать». Потолок в минуту: дольше ждать бессмысленно."""
+    raw = (getattr(err, "headers", None) or {}).get("Retry-After")
+    try:
+        return max(0, min(float(raw), 60))
+    except (TypeError, ValueError):
+        return API_BACKOFF * (attempt + 1)
+
 def api(method, endpoint, body=None, token=None):
     url = BUILDIN_BASE + endpoint
     data = json.dumps(body).encode() if body else None
@@ -71,16 +81,18 @@ def api(method, endpoint, body=None, token=None):
     req.add_header("x-app-origin", "web")
     req.add_header("x-product", "buildin")
     req.add_header("app_version_name", "1.146.0")
-    # Повторяем сетевые обрывы: публикация сначала удаляет блоки страницы, и
-    # если append упадёт на таймауте, страница останется разрушенной. HTTP-ошибку
-    # повторять нельзя — она про сам запрос, а не про сеть.
+    # Повторяем и сетевые обрывы, и транзиентные ответы шлюза: 429/5xx приходят
+    # как HTTPError, но говорят о перегрузке, а не о самом запросе. Тело
+    # транзакции несёт постоянный requestId, поэтому повтор идемпотентен.
     for attempt in range(API_TRIES):
         try:
             with urllib.request.urlopen(req, timeout=API_TIMEOUT) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             body_txt = e.read().decode()
-            raise RuntimeError(f"HTTP {e.code}: {body_txt[:300]}")
+            if e.code not in API_RETRY_STATUS or attempt == API_TRIES - 1:
+                raise RuntimeError(f"HTTP {e.code}: {body_txt[:300]}")
+            time.sleep(_retry_delay(e, attempt))
         except Exception as e:
             if attempt == API_TRIES - 1:
                 raise RuntimeError("сеть недоступна после %d попыток: %s: %s"
@@ -103,11 +115,17 @@ def get_user_id(token):
     return me["data"]["uuid"]
 
 def resolve_space_id(page_id, token):
-    """spaceId целевой страницы. Хардкод опасен: блоки, созданные с чужим
-    spaceId, попадают не в то пространство и на странице не появляются."""
+    """spaceId целевой страницы. Фолбэка нет намеренно: блоки с чужим spaceId
+    уходят не в то пространство и на странице не появляются — причём молча, с
+    успешным ответом API. Явный отказ заметнее потерянной публикации."""
     data = api("GET", f"/api/docs/{page_id}", token=token)
     block = (data.get("data") or {}).get("blocks", {}).get(page_id) or {}
-    return block.get("spaceId") or FALLBACK_SPACE_ID
+    space_id = block.get("spaceId")
+    if not space_id:
+        raise RuntimeError(
+            "не удалось определить spaceId страницы %s — проверьте, что id верный "
+            "и токен даёт доступ к странице" % page_id)
+    return space_id
 
 
 def get_blocks_info(page_id, token):
@@ -253,30 +271,36 @@ def main():
 
     global SPACE_ID
     SPACE_ID = resolve_space_id(page_id, token)
-    if SPACE_ID != FALLBACK_SPACE_ID:
-        print(f"Space: {SPACE_ID}")
+    print(f"Space: {SPACE_ID}")
 
+    # Удаление идёт последним, когда новые блоки уже на странице. Обратный
+    # порядок оставлял страницу пустой при любом сбое между удалением и
+    # заливкой — сорванной конвертации или 5xx на середине батчей, — и откатить
+    # это было нечем. Ценой короткого окна с дублем содержимого страница теперь
+    # ни в один момент не пуста.
+    delete_ids = []
     if mode == "replace":
         print("\nStep 1: Get existing blocks...")
         delete_ids, child_ids = get_blocks_info(page_id, token)
-        print(f"  Found {len(delete_ids)} blocks to delete, {len(child_ids)} child page(s) to preserve")
-        if delete_ids:
-            print(f"\nStep 2: Delete {len(delete_ids)} existing blocks...")
-            delete_all_blocks(page_id, delete_ids, user_id, token)
-            print("  Done!")
+        print(f"  Found {len(delete_ids)} blocks to replace, {len(child_ids)} child page(s) to preserve")
     else:
         print("\nMode: append — существующие блоки не трогаем")
 
-    print(f"\nStep 3: Parse markdown {md_file}...")
+    print(f"\nStep 2: Parse markdown {md_file}...")
     blocks = convert_markdown(md_file, skip_h1=skip_h1)
     rows = sum(len(b.get("children") or []) for b in blocks)
     print(f"  Converted to {len(blocks)} blocks ({rows} nested), skip_h1={skip_h1}")
 
-    print(f"\nStep 4: Append {len(blocks)} blocks in batches of {BATCH_SIZE}...")
+    print(f"\nStep 3: Append {len(blocks)} blocks in batches of {BATCH_SIZE}...")
     for i in range(0, len(blocks), BATCH_SIZE):
         batch = blocks[i:i+BATCH_SIZE]
         append_blocks_batch(page_id, batch, user_id, token)
         print(f"  Batch {i//BATCH_SIZE + 1}: {len(batch)} blocks appended")
+
+    if delete_ids:
+        print(f"\nStep 4: Delete {len(delete_ids)} replaced blocks...")
+        delete_all_blocks(page_id, delete_ids, user_id, token)
+        print("  Done!")
 
     print(f"\n✅ Done! Page updated: https://buildin.ai/{SPACE_ID}/{page_id}")
 

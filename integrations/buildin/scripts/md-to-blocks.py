@@ -230,11 +230,23 @@ COL_MAX_WIDTH = 620
 TABLE_WIDTH_BUDGET = 1240   # ширина контента страницы при pageFixedWidth: false
 
 
+def visible_len(cell):
+    """Длина отрендеренного текста ячейки.
+
+    Мерить по сырому markdown нельзя: ссылка занимает ширину своей подписи, а
+    не URL. Иначе колонка с длинными ссылками выбирает максимум и выдавливает
+    содержательные колонки на минимум — ровно тот перекос, ради которого
+    ширины и считаются. Длину берём у того же parse_inline, что строит
+    сегменты: вторая логика разбора неизбежно разойдётся с первой.
+    """
+    return sum(len(s.get("text", "")) for s in parse_inline(cell))
+
+
 def column_widths(rows, ncols):
     """Ширины колонок, уложенные в бюджет страницы."""
     w = []
     for c in range(ncols):
-        longest = max((len(r[c]) if c < len(r) else 0) for r in rows) if rows else 0
+        longest = max((visible_len(r[c]) if c < len(r) else 0) for r in rows) if rows else 0
         raw = round(26 + 8.4 * min(longest, 88))
         w.append(max(COL_MIN_WIDTH, min(COL_MAX_WIDTH, raw)))
 
@@ -308,8 +320,10 @@ def heading_level(hashes, shift):
 
 
 def parse_md(md, shift=False, skip_h1=False):
-    """skip_h1 выбрасывает H1 — он дублирует заголовок самой страницы."""
-    """Markdown → плоский список блоков (с пометкой collapse у заголовков)."""
+    """Markdown → плоский список блоков (с пометкой collapse у заголовков).
+
+    skip_h1 выбрасывает ведущий H1 — он дублирует заголовок самой страницы.
+    """
     blocks = []
     lines = md.split("\n")
     i = 0
@@ -347,7 +361,9 @@ def parse_md(md, shift=False, skip_h1=False):
         # Заголовок
         mh = re.match(r"^(#{1,6})\s+(.+)$", line)
         if mh:
-            if skip_h1 and len(mh.group(1)) == 1:
+            # Снимаем только ведущий H1: он дублирует имя страницы. H1 ниже
+            # по тексту — осмысленный раздел, и выбрасывать его нельзя.
+            if skip_h1 and len(mh.group(1)) == 1 and not blocks:
                 i += 1
                 continue
             level = heading_level(mh.group(1), shift)
