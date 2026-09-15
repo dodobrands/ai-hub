@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""
-Buildin page updater: delete all blocks and replace with markdown content.
-Usage: python3 buildin_publish.py <page_id> <markdown_file> [skip_h1]
+"""Публикация markdown в страницу Buildin: дописать в конец или заменить содержимое.
+
+Движок команды `buildin-pages.sh publish-md`; вызывать напрямую тоже можно.
+Разбор markdown делает md-to-blocks.py, сборку операций — buildin-blocks.py;
+здесь остаётся то, чего нет в shell-пути: ретраи сетевых обрывов, батчи,
+сохранение дочерних страниц при замене и поиск .env без hub-meta.
+
+Usage: buildin-publish-md.py <page_id|url> <file.md> [--append|--replace] [--skip-h1|--keep-h1]
 """
 import json, re, sys, uuid, time, os, subprocess, urllib.request, urllib.error
 
@@ -135,185 +140,38 @@ def delete_all_blocks(page_id, block_ids, user_id, token):
         transaction(chunk, token)
         print(f"  Deleted batch {i//chunk_size + 1} ({len([o for o in chunk if o['command']=='update' and 'status' in o.get('args',{})])//1} ops)")
 
-# ---- Markdown → Buildin blocks ----
+def _helper(name):
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+    if not os.path.exists(path):
+        raise RuntimeError("%s рядом не найден: %s" % (name, path))
+    return path
 
-def parse_inline(text):
-    segs = []
-    pos = 0
-    pattern = re.compile(r'\*\*(.*?)\*\*|`(.*?)`|\[(.*?)\]\((.*?)\)')
-    for m in pattern.finditer(text):
-        if m.start() > pos:
-            plain = text[pos:m.start()]
-            if plain:
-                segs.append({"type": 0, "text": plain, "enhancer": {}})
-        full = m.group(0)
-        if full.startswith("**"):
-            segs.append({"type": 0, "text": m.group(1), "enhancer": {"bold": True}})
-        elif full.startswith("`"):
-            segs.append({"type": 0, "text": m.group(2), "enhancer": {"code": True}})
-        else:
-            segs.append({"type": 3, "text": m.group(3), "url": m.group(4), "enhancer": {}})
-        pos = m.end()
-    if pos < len(text):
-        rest = text[pos:]
-        if rest:
-            segs.append({"type": 0, "text": rest, "enhancer": {}})
-    if not segs:
-        segs.append({"type": 0, "text": text, "enhancer": {}})
-    return segs
 
-def table_to_text(table_lines):
-    rows = []
-    for line in table_lines:
-        if re.match(r'^\|[-\s|:]+\|$', line.strip()):
-            continue
-        cells = [c.strip() for c in line.strip().strip('|').split('|')]
-        rows.append(' | '.join(cells))
-    return '\n'.join(rows)
+def build_ops(page_id, blocks, user_id, now):
+    """Операции транзакции собирает buildin-blocks.py, а не этот скрипт.
 
-def md_to_blocks(content, skip_h1=True):
-    blocks = []
-    lines = content.split('\n')
-    i = 0
-    first_h1_skipped = False
-
-    while i < len(lines):
-        raw = lines[i]
-        line = raw.rstrip()
-
-        # Empty
-        if not line.strip():
-            i += 1
-            continue
-
-        # Divider
-        if re.match(r'^[-*_]{3,}\s*$', line):
-            blocks.append({"type": 9, "data": {}})
-            i += 1
-            continue
-
-        # Heading
-        m = re.match(r'^(#{1,6})\s+(.*)', line)
-        if m:
-            level = min(len(m.group(1)), 3)
-            text = m.group(2).strip()
-            if skip_h1 and level == 1 and not first_h1_skipped:
-                first_h1_skipped = True
-                i += 1
-                continue
-            blocks.append({"type": 7, "data": {"level": level, "segments": parse_inline(text)}})
-            i += 1
-            continue
-
-        # Code block
-        if line.startswith('```'):
-            lang = line[3:].strip()
-            code_lines = []
-            i += 1
-            while i < len(lines) and not lines[i].rstrip().startswith('```'):
-                code_lines.append(lines[i].rstrip())
-                i += 1
-            i += 1
-            blocks.append({"type": 25, "data": {
-                "language": lang or "text",
-                "segments": [{"type": 0, "text": '\n'.join(code_lines), "enhancer": {}}]
-            }})
-            continue
-
-        # Bullet list
-        m = re.match(r'^[-*+]\s+(.*)', line)
-        if m:
-            blocks.append({"type": 4, "data": {"segments": parse_inline(m.group(1).strip())}})
-            i += 1
-            continue
-
-        # Blockquote → callout
-        m = re.match(r'^>\s*(.*)', line)
-        if m:
-            blocks.append({"type": 13, "data": {"segments": parse_inline(m.group(1).strip())}})
-            i += 1
-            continue
-
-        # Table
-        if line.startswith('|'):
-            table_lines = []
-            while i < len(lines) and lines[i].rstrip().startswith('|'):
-                table_lines.append(lines[i].rstrip())
-                i += 1
-            blocks.append({"type": 25, "data": {
-                "language": "text",
-                "segments": [{"type": 0, "text": table_to_text(table_lines), "enhancer": {}}]
-            }})
-            continue
-
-        # Paragraph (accumulate)
-        para = [line]
-        i += 1
-        while i < len(lines):
-            nxt = lines[i].rstrip()
-            if not nxt.strip():
-                break
-            if (nxt.startswith('#') or nxt.startswith('```') or nxt.startswith('|') or
-                    nxt.startswith('>') or re.match(r'^[-*_]{3,}\s*$', nxt) or
-                    re.match(r'^[-*+]\s+', nxt)):
-                break
-            para.append(nxt)
-            i += 1
-        blocks.append({"type": 1, "data": {"segments": parse_inline(' '.join(para))}})
-
-    return blocks
-
-def _block_ops(block, parent_id, user_id, now, after=None):
-    """Операции на один блок и, рекурсивно, на его children.
-
-    Вложенные блоки обязательны для таблиц: md-to-blocks отдаёт таблицу (27) с
-    children-строками (28), и без их публикации на странице остаётся пустая
-    рамка. Порядок строк держится через after — без него строки перемешиваются.
+    Раньше здесь жила своя рекурсия по children — третья копия одной и той же
+    логики (первая в buildin-blocks.py, вторая была в выброшенном конвертере).
+    Копии расходятся: именно поэтому строки таблиц какое-то время терялись.
+    Хелпер уже умеет вложенность, listBefore и цвета блоков, и его зовёт
+    buildin-pages.sh, то есть он проверяется на каждой ручной вставке.
     """
-    bid = str(uuid.uuid4())
-    ops = [{
-        "id": bid,
-        "command": "set",
-        "table": "block",
-        "path": [],
-        "args": {
-            "uuid": bid,
-            "spaceId": SPACE_ID,
-            "parentId": parent_id,
-            "type": block["type"],
-            "textColor": "",
-            "backgroundColor": "",
-            "status": 1,
-            "permissions": [],
-            "createdAt": now,
-            "createdBy": user_id,
-            "updatedBy": user_id,
-            "updatedAt": now,
-            "data": {**{"pageFixedWidth": True, "format": {"commentAlignment": "top"}},
-                     **block["data"]}
-        }
-    }]
-    attach = {"uuid": bid}
-    if after:
-        attach["after"] = after
-    ops.append({"id": parent_id, "command": "listAfter", "table": "block",
-                "path": ["subNodes"], "args": attach})
-    prev = None
-    for child in block.get("children") or []:
-        child_ops, prev = _block_ops(child, bid, user_id, now, after=prev)
-        ops.extend(child_ops)
-    return ops, bid
+    r = subprocess.run(
+        [sys.executable, _helper("buildin-blocks.py"), page_id, SPACE_ID,
+         str(now), user_id, json.dumps(blocks, ensure_ascii=False)],
+        capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        raise RuntimeError("buildin-blocks.py упал: " + (r.stderr or "")[:300])
+    return json.loads(r.stdout)
 
 
 def append_blocks_batch(page_id, blocks, user_id, token):
+    """Блоки батча цепляются друг за другом, а сам батч встаёт в конец страницы:
+    listAfter без after — это добавление в хвост, поэтому порядок между батчами
+    сохраняется без передачи хвостового uuid."""
     now = int(time.time() * 1000)
-    ops = []
-    for block in blocks:
-        block_ops, _ = _block_ops(block, page_id, user_id, now)
-        ops.extend(block_ops)
-    ops.append({"id": page_id, "command": "update", "table": "block", "path": [],
-                "args": {"updatedBy": user_id, "updatedAt": now}})
-    transaction(ops, token)
+    transaction(build_ops(page_id, blocks, user_id, now), token)
+
 
 def convert_markdown(md_file, skip_h1=True):
     """Разбор markdown внешним md-to-blocks.py, а не встроенным конвертером.
@@ -323,10 +181,7 @@ def convert_markdown(md_file, skip_h1=True):
     колонок, языки блоков кода и вложенность списков. Держать два конвертера
     means держать два набора багов; внешний поддерживается и покрыт тестами.
     """
-    conv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "md-to-blocks.py")
-    if not os.path.exists(conv):
-        raise RuntimeError("md-to-blocks.py рядом не найден: " + conv)
-    cmd = [sys.executable, conv, md_file]
+    cmd = [sys.executable, _helper("md-to-blocks.py"), md_file]
     if skip_h1:
         # H1 — заголовок самой страницы; блоком на странице он лишний.
         # Раньше сюда передавался --shift-headings, но это другая операция:
@@ -338,16 +193,60 @@ def convert_markdown(md_file, skip_h1=True):
     return json.loads(r.stdout)
 
 
+USAGE = """Usage: buildin-publish-md.py <page_id|url> <file.md> [--append|--replace] [--skip-h1|--keep-h1]
+
+  --append    дописать блоки в конец страницы, ничего не удаляя
+  --replace   заменить содержимое: удалить блоки страницы и залить заново
+              (ссылки на дочерние страницы, type 0, сохраняются)
+
+Режим по умолчанию — --replace, как и раньше у этого скрипта. Точка входа для
+новой работы — buildin-pages.sh publish-md, там по умолчанию --append.
+
+  --skip-h1   не публиковать первый H1 (он же заголовок страницы); по умолчанию
+              включён в --replace и выключен в --append: дописываемый фрагмент
+              начинается с настоящего заголовка раздела, а не с имени страницы.
+"""
+
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def parse_id(value):
+    """URL страницы принимается наравне с UUID — как в buildin-pages.sh."""
+    found = UUID_RE.findall(value or "")
+    return found[-1] if found else value
+
+
+def parse_args(argv):
+    mode, skip_h1, positional = None, None, []
+    for a in argv:
+        if a in ("--append", "--replace"):
+            mode = a[2:]
+        elif a == "--skip-h1":
+            skip_h1 = True
+        elif a == "--keep-h1":
+            skip_h1 = False
+        elif a.lower() in ("true", "false") and len(positional) == 2:
+            # Обратная совместимость: третьим позиционным был skip_h1.
+            skip_h1 = a.lower() != "false"
+        elif a.startswith("-"):
+            raise SystemExit("неизвестный флаг: " + a + "\n\n" + USAGE)
+        else:
+            positional.append(a)
+    if len(positional) < 2:
+        raise SystemExit(USAGE)
+    if mode is None:
+        mode = "replace"
+        print("режим не указан — replace, как раньше. Явный флаг надёжнее: "
+              "--append дописывает, --replace заменяет", file=sys.stderr)
+    if skip_h1 is None:
+        skip_h1 = (mode == "replace")
+    return parse_id(positional[0]), positional[1], mode, skip_h1
+
+
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: python3 buildin_publish.py <page_id> <markdown_file> [skip_h1=true]")
-        sys.exit(1)
+    page_id, md_file, mode, skip_h1 = parse_args(sys.argv[1:])
 
-    page_id = sys.argv[1]
-    md_file = sys.argv[2]
-    skip_h1 = sys.argv[3].lower() != 'false' if len(sys.argv) > 3 else True
-
-    print(f"Loading token...")
+    print("Loading token...")
     token = load_token()
     user_id = get_user_id(token)
     print(f"User ID: {user_id[:8]}...")
@@ -357,19 +256,21 @@ def main():
     if SPACE_ID != FALLBACK_SPACE_ID:
         print(f"Space: {SPACE_ID}")
 
-    print(f"\nStep 1: Get existing blocks...")
-    delete_ids, child_ids = get_blocks_info(page_id, token)
-    print(f"  Found {len(delete_ids)} blocks to delete, {len(child_ids)} child page(s) to preserve")
-
-    if delete_ids:
-        print(f"\nStep 2: Delete {len(delete_ids)} existing blocks...")
-        delete_all_blocks(page_id, delete_ids, user_id, token)
-        print(f"  Done!")
+    if mode == "replace":
+        print("\nStep 1: Get existing blocks...")
+        delete_ids, child_ids = get_blocks_info(page_id, token)
+        print(f"  Found {len(delete_ids)} blocks to delete, {len(child_ids)} child page(s) to preserve")
+        if delete_ids:
+            print(f"\nStep 2: Delete {len(delete_ids)} existing blocks...")
+            delete_all_blocks(page_id, delete_ids, user_id, token)
+            print("  Done!")
+    else:
+        print("\nMode: append — существующие блоки не трогаем")
 
     print(f"\nStep 3: Parse markdown {md_file}...")
     blocks = convert_markdown(md_file, skip_h1=skip_h1)
     rows = sum(len(b.get("children") or []) for b in blocks)
-    print(f"  Converted to {len(blocks)} blocks ({rows} nested)")
+    print(f"  Converted to {len(blocks)} blocks ({rows} nested), skip_h1={skip_h1}")
 
     print(f"\nStep 4: Append {len(blocks)} blocks in batches of {BATCH_SIZE}...")
     for i in range(0, len(blocks), BATCH_SIZE):
@@ -378,6 +279,7 @@ def main():
         print(f"  Batch {i//BATCH_SIZE + 1}: {len(batch)} blocks appended")
 
     print(f"\n✅ Done! Page updated: https://buildin.ai/{SPACE_ID}/{page_id}")
+
 
 if __name__ == "__main__":
     main()

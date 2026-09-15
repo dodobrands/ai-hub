@@ -16,6 +16,9 @@
 #   get-blocks <page_id>                   — получить блоки страницы (JSON)
 #   comments <page_id|url[#block_id]> [block_id] — комментарии страницы или конкретного блока
 #                                                  (URL с якорем #block-uuid фильтрует по блоку)
+#   publish-md <page_id> <file.md> [--replace]          — опубликовать markdown-файл
+#                                                        (по умолчанию дописывает в конец;
+#                                                         --replace заменяет содержимое)
 #   append-blocks <page_id> <json_blocks>              — добавить блоки на страницу (transaction)
 #                                                        блоки могут иметь "children" (таблицы/toggle/вложенные списки)
 #   insert-blocks-after <page_id> <after_block_id> <json_blocks>   — вставить блоки после конкретного блока
@@ -533,6 +536,28 @@ render(page.get('subNodes', []))
 " "$PAGE_ID"
         ;;
 
+    publish-md)
+        PAGE_ID=$(parse_id "$1")
+        MD_FILE="$2"
+        [[ -z "$PAGE_ID" || -z "$MD_FILE" ]] && { echo "Usage: publish-md <page_id|url> <file.md> [--replace] [--skip-h1|--keep-h1]" >&2; exit 1; }
+        [[ -f "$MD_FILE" ]] || { echo "Error: файл не найден: $MD_FILE" >&2; exit 1; }
+        shift 2
+
+        # Режим по умолчанию — append: он же поведение связки
+        # md-to-blocks.py + append-blocks, которой пользовались до появления
+        # этой команды. Замена страницы включается только явным --replace.
+        MODE="--append"
+        REST=()
+        for arg in "$@"; do
+            case "$arg" in
+                --replace|--append) MODE="$arg" ;;
+                *) REST+=("$arg") ;;
+            esac
+        done
+
+        python3 "$SCRIPT_DIR/buildin-publish-md.py" "$PAGE_ID" "$MD_FILE" "$MODE" ${REST+"${REST[@]}"}
+        ;;
+
     append-blocks)
         PAGE_ID=$(parse_id "$1")
         BLOCKS_JSON="$2"
@@ -767,7 +792,8 @@ print(json.dumps(ops))
         echo "  archive <id|url>                         — архивировать (status: -1)"
         echo "  get-blocks <id|url>                      — блоки страницы (JSON; id блока в поле uuid)"
         echo "  comments <id|url[#block_id]> [block_id]  — комментарии страницы или блока (якорь #block-uuid фильтрует)"
-        echo "  append-blocks <id|url> <json_blocks>     — добавить блоки в конец страницы"
+        echo "  publish-md <id|url> <file.md> [--replace] — опубликовать markdown (по умолчанию в конец)"
+echo "  append-blocks <id|url> <json_blocks>     — добавить блоки в конец страницы"
         echo "  insert-blocks-after <id|url> <after_block_id> <json_blocks>   — вставить блоки после блока"
         echo "  insert-blocks-before <id|url> <before_block_id> <json_blocks> — вставить блоки перед блоком"
         echo "  append-text <id|url> <text>              — добавить текстовый параграф"
