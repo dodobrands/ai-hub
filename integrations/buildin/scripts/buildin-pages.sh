@@ -793,7 +793,7 @@ print(json.dumps(ops))
         echo "  get-blocks <id|url>                      — блоки страницы (JSON; id блока в поле uuid)"
         echo "  comments <id|url[#block_id]> [block_id]  — комментарии страницы или блока (якорь #block-uuid фильтрует)"
         echo "  publish-md <id|url> <file.md> [--replace] — опубликовать markdown (по умолчанию в конец)"
-echo "  append-blocks <id|url> <json_blocks>     — добавить блоки в конец страницы"
+        echo "  append-blocks <id|url> <json_blocks>     — добавить блоки в конец страницы"
         echo "  insert-blocks-after <id|url> <after_block_id> <json_blocks>   — вставить блоки после блока"
         echo "  insert-blocks-before <id|url> <before_block_id> <json_blocks> — вставить блоки перед блоком"
         echo "  append-text <id|url> <text>              — добавить текстовый параграф"

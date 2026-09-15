@@ -26,44 +26,15 @@ BUDGET = 1240
 API = "https://buildin.ai"
 
 
-def _env_candidates():
-    """Где искать .env — порядок из hub-meta/scripts/load-env.sh.
-
-    Жёсткий путь ~/dodo/ai-hub/.env работает только у клона репозитория. При
-    установке плагином такого каталога нет, и публикация падала бы на старте.
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    # вверх от скрипта до ближайшего .env: в клоне это корень репозитория
-    d = here
-    for _ in range(6):
-        yield os.path.join(d, ".env")
-        parent = os.path.dirname(d)
-        if parent == d:
-            break
-        d = parent
-    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    yield os.path.join(xdg, "ai-hub", ".env")
-    yield os.path.expanduser("~/.ai-hub/.env")
-    yield os.path.expanduser("~/.claude/plugins/cache/ai-hub/.env")
-    yield os.path.expanduser("~/dodo/ai-hub/.env")
-
-
-def _read_token(name="BUILDIN_UI_TOKEN"):
-    seen = []
-    for path in _env_candidates():
-        if path in seen or not os.path.exists(path):
-            continue
-        seen.append(path)
-        for line in open(path, encoding="utf-8"):
-            if line.startswith(name + "="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise RuntimeError(
-        "%s не найден. Искал в: %s. Обновите токен через buildin-login.sh"
-        % (name, ", ".join(seen) or "нигде — ни один .env не существует"))
+# Поиск .env вынесен в общий модуль: копия в каждом скрипте расходилась.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from buildin_env import read_token
 
 
 def load_token():
-    return _read_token()
+    return read_token()
 
 
 def api_get(path, token):
@@ -177,13 +148,22 @@ def strip_inline(s):
     return s.replace("`", "").replace("**", "").strip()
 
 
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def parse_id(value):
+    """URL страницы принимается наравне с UUID — как в buildin-pages.sh."""
+    found = UUID_RE.findall(value or "")
+    return found[-1] if found else value
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     as_json = "--json" in sys.argv
     if len(args) != 2:
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    page_id, md_path = args
+    page_id, md_path = parse_id(args[0]), args[1]
     try:
         token = load_token()
         page = page_facts(page_id, token)

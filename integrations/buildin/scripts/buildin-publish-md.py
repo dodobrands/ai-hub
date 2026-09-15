@@ -23,44 +23,16 @@ API_BACKOFF = 4
 # Транзиентные статусы: их повтор имеет смысл, прочие 4xx — про сам запрос.
 API_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 
-def _env_candidates():
-    """Где искать .env — порядок из hub-meta/scripts/load-env.sh.
-
-    Жёсткий путь ~/dodo/ai-hub/.env работает только у клона репозитория. При
-    установке плагином такого каталога нет, и публикация падала бы на старте.
-    """
-    here = os.path.dirname(os.path.abspath(__file__))
-    # вверх от скрипта до ближайшего .env: в клоне это корень репозитория
-    d = here
-    for _ in range(6):
-        yield os.path.join(d, ".env")
-        parent = os.path.dirname(d)
-        if parent == d:
-            break
-        d = parent
-    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    yield os.path.join(xdg, "ai-hub", ".env")
-    yield os.path.expanduser("~/.ai-hub/.env")
-    yield os.path.expanduser("~/.claude/plugins/cache/ai-hub/.env")
-    yield os.path.expanduser("~/dodo/ai-hub/.env")
-
-
-def _read_token(name="BUILDIN_UI_TOKEN"):
-    seen = []
-    for path in _env_candidates():
-        if path in seen or not os.path.exists(path):
-            continue
-        seen.append(path)
-        for line in open(path, encoding="utf-8"):
-            if line.startswith(name + "="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise RuntimeError(
-        "%s не найден. Искал в: %s. Обновите токен через buildin-login.sh"
-        % (name, ", ".join(seen) or "нигде — ни один .env не существует"))
+# Поиск .env вынесен в общий модуль: копия в каждом скрипте расходилась.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from buildin_env import read_token
 
 
 def load_token():
-    return _read_token()
+    return read_token()
+
 
 def _retry_delay(err, attempt):
     """Retry-After сервера важнее нашего backoff — при 429 он и есть ответ
@@ -114,13 +86,22 @@ def get_user_id(token):
     me = api("GET", "/api/users/me", token=token)
     return me["data"]["uuid"]
 
+def fetch_doc(page_id, token):
+    """Документ страницы одним запросом: spaceId и список блоков берутся из
+    одного ответа, а не двумя отдельными GET за одним и тем же адресом."""
+    data = api("GET", f"/api/docs/{page_id}", token=token)
+    return (data.get("data") or {}).get("blocks", {}) or {}
+
+
 def resolve_space_id(page_id, token):
     """spaceId целевой страницы. Фолбэка нет намеренно: блоки с чужим spaceId
     уходят не в то пространство и на странице не появляются — причём молча, с
     успешным ответом API. Явный отказ заметнее потерянной публикации."""
-    data = api("GET", f"/api/docs/{page_id}", token=token)
-    block = (data.get("data") or {}).get("blocks", {}).get(page_id) or {}
-    space_id = block.get("spaceId")
+    return space_id_of(fetch_doc(page_id, token), page_id)
+
+
+def space_id_of(all_blocks, page_id):
+    space_id = (all_blocks.get(page_id) or {}).get("spaceId")
     if not space_id:
         raise RuntimeError(
             "не удалось определить spaceId страницы %s — проверьте, что id верный "
@@ -128,11 +109,9 @@ def resolve_space_id(page_id, token):
     return space_id
 
 
-def get_blocks_info(page_id, token):
+def get_blocks_info(all_blocks, page_id):
     """Returns (all_block_ids, child_page_block_ids).
     type=0 blocks are child page references — must NOT be deleted."""
-    data = api("GET", f"/api/docs/{page_id}", token=token)
-    all_blocks = data.get("data", {}).get("blocks", {})
     page = all_blocks.get(page_id, {})
     sub_nodes = page.get("subNodes", [])
     child_ids = [bid for bid in sub_nodes if all_blocks.get(bid, {}).get("type") == 0]
@@ -250,7 +229,12 @@ def parse_args(argv):
             raise SystemExit("неизвестный флаг: " + a + "\n\n" + USAGE)
         else:
             positional.append(a)
-    if len(positional) < 2:
+    if len(positional) != 2:
+        # Молчаливо съеденный третий аргумент — это либо второй файл, который
+        # так и не опубликовался, либо флаг, написанный без дефисов.
+        if len(positional) > 2:
+            raise SystemExit("лишние аргументы: %s\n\n%s"
+                             % (" ".join(positional[2:]), USAGE))
         raise SystemExit(USAGE)
     if mode is None:
         mode = "replace"
@@ -269,8 +253,9 @@ def main():
     user_id = get_user_id(token)
     print(f"User ID: {user_id[:8]}...")
 
+    doc = fetch_doc(page_id, token)
     global SPACE_ID
-    SPACE_ID = resolve_space_id(page_id, token)
+    SPACE_ID = space_id_of(doc, page_id)
     print(f"Space: {SPACE_ID}")
 
     # Удаление идёт последним, когда новые блоки уже на странице. Обратный
@@ -281,7 +266,7 @@ def main():
     delete_ids = []
     if mode == "replace":
         print("\nStep 1: Get existing blocks...")
-        delete_ids, child_ids = get_blocks_info(page_id, token)
+        delete_ids, child_ids = get_blocks_info(doc, page_id)
         print(f"  Found {len(delete_ids)} blocks to replace, {len(child_ids)} child page(s) to preserve")
     else:
         print("\nMode: append — существующие блоки не трогаем")

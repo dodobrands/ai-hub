@@ -67,6 +67,16 @@ summary_skip_h1() {
     python3 "$SCRIPT" - --skip-h1 | python3 "$SANDBOX/summary.py"
 }
 
+# markdown со stdin → суммарная ширина первой таблицы
+total_width() {
+    python3 "$SCRIPT" - | python3 -c '
+import json, sys
+fmt = json.load(sys.stdin)[0]["data"]["format"]
+cw = fmt["tableBlockColumnFormat"]
+print(sum(cw[c]["width"] for c in fmt["tableBlockColumnOrder"]))
+'
+}
+
 # markdown со stdin → ширины колонок первой таблицы, по порядку колонок
 widths() {
     python3 "$SCRIPT" - | python3 -c '
@@ -284,4 +294,18 @@ MD
     [ "$text_w" -gt "$link_w" ]
     # и колонка со ссылкой не должна упираться в максимум из-за длины URL
     [ "$link_w" -lt 620 ]
+}
+
+# Широкая таблица должна укладываться в страницу сама: пол в 120 px на колонку
+# делал бюджет недостижимым от 11 колонок, и сверка вечно репортила дефект,
+# которого генератор не мог избежать.
+@test "a wide table is squeezed into the page budget" {
+    run total_width <<'MD'
+| c01 | c02 | c03 | c04 | c05 | c06 | c07 | c08 | c09 | c10 | c11 | c12 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| v01 | v02 | v03 | v04 | v05 | v06 | v07 | v08 | v09 | v10 | v11 | v12 |
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [ "$output" -le 1240 ]
 }

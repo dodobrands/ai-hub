@@ -75,9 +75,11 @@ def page_doc(space_id="space-1"):
     return {PAGE_ID: page, "b1": {"type": 1}, "b2": {"type": 1}, "b3": {"type": 0}}
 
 
-def make_urlopen(doc, tx_log, on_tx=None):
+def make_urlopen(doc, tx_log, on_tx=None, calls=None):
     def fake(req, timeout=None):
         endpoint = req.full_url.split("buildin.ai", 1)[-1]
+        if calls is not None:
+            calls.append(endpoint)
         if endpoint == "/api/users/me":
             return Resp({"code": 200, "data": {"uuid": "user-1"}})
         if endpoint.startswith("/api/docs/"):
@@ -159,6 +161,24 @@ def main():
                  make_urlopen(page_doc(space_id=None), tx))
     check(err is not None, "без spaceId публикация завершается ошибкой")
     check(tx == [], "без spaceId не отправлено ни одной транзакции", "транзакции: %s" % tx)
+
+    # 6. Лишний позиционный аргумент — опечатка во флаге или второй файл,
+    #    который молча не публиковался.
+    tx = []
+    _, err = run(load_module(), [PAGE_ID, md, md, "--replace"],
+                 make_urlopen(page_doc(), tx))
+    check(err is not None, "лишний позиционный аргумент отвергается")
+    check(tx == [], "при лишнем аргументе страница не трогается", "транзакции: %s" % tx)
+
+    # 7. Документ страницы читается один раз: spaceId и список блоков брались
+    #    двумя отдельными запросами к одному и тому же /api/docs.
+    tx, calls = [], []
+    _, err = run(load_module(), [PAGE_ID, md, "--replace"],
+                 make_urlopen(page_doc(), tx, calls=calls))
+    docs = [c for c in calls if c.startswith("/api/docs/")]
+    check(err is None, "replace проходит", repr(err))
+    check(len(docs) == 1, "документ страницы читается одним запросом",
+          "запросов к /api/docs: %d" % len(docs))
 
     print("---")
     if FAILS:

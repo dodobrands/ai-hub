@@ -81,8 +81,10 @@ def make_page(sub_ids, blocks):
     return doc
 
 
-def run(mod, doc, md_text, extra_args=()):
+def run(mod, doc, md_text, extra_args=(), page_ref=PAGE_ID, paths=None):
     def fake(req, timeout=None):
+        if paths is not None:
+            paths.append(req.full_url.split("buildin.ai", 1)[-1])
         return Resp({"data": {"blocks": doc}})
     original = urllib.request.urlopen
     urllib.request.urlopen = fake
@@ -93,7 +95,7 @@ def run(mod, doc, md_text, extra_args=()):
         fh.write(md_text)
     out = io.StringIO()
     try:
-        sys.argv = ["buildin-verify-md.py", PAGE_ID, md] + list(extra_args)
+        sys.argv = ["buildin-verify-md.py", page_ref, md] + list(extra_args)
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             rc = mod.main()
     finally:
@@ -156,6 +158,18 @@ def main():
     check(rc == 1, "лишний блок на странице — расхождение", out.strip())
     check("--replace" in out,
           "сообщение объясняет, что сверка рассчитана на --replace", out.strip())
+
+    # 6. URL страницы принимается наравне с UUID — как во всех соседних
+    #    инструментах, иначе вставленная ссылка даёт невнятный HTTP 404.
+    blocks = {"h-1": heading("Раздел")}
+    doc = make_page(["h-1"], blocks)
+    paths = []
+    rc, out = run(load_module(), doc, "## Раздел\n",
+                  page_ref="https://buildin.ai/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/" + PAGE_ID,
+                  paths=paths)
+    check(paths == ["/api/docs/" + PAGE_ID],
+          "URL страницы приводится к page_id", "запрошено: %s" % paths)
+    check(rc == 0, "сверка по URL проходит", out.strip())
 
     print("---")
     if FAILS:
