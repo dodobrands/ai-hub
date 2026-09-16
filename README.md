@@ -2,6 +2,9 @@
 
 Набор AI-инструментов для интеграции с разными полезными сервисами: Kaiten, Time (Mattermost), Buildin, Genie, Holst. Плюс автоматизация spike-исследований, product discovery, тестирования и диагностики.
 
+> **Новые скиллы публикуются в [dodo-ai-platform/marketplace-ai-tools](https://github.com/dodo-ai-platform/marketplace-ai-tools).**  
+> По всем вопросам обращайтесь к команде Маркетплейса, канал [ai-hub-public](https://dodobrands.time-messenger.ru/dodo-brands/channels/ai-hub-public).
+
 ---
 
 Для AI-агентов есть отдельная короткая инструкция: [INSTALL.md](INSTALL.md).
@@ -254,6 +257,10 @@ your-team-repo/
 ---
 
 ## Добавить новый скилл
+
+Новые скиллы публикуются в [dodo-ai-platform/marketplace-ai-tools](https://github.com/dodo-ai-platform/marketplace-ai-tools), а не сюда. С вопросами — в команду Маркетплейса: [ai-hub-public](https://dodobrands.time-messenger.ru/dodo-brands/channels/ai-hub-public).
+
+Добавить команду в существующую интеграцию этого репозитория:
 
 ```bash
 # Создать команду (файл + симлинк + запись в registry)
