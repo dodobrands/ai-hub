@@ -27,18 +27,18 @@ AI Hub опубликован как marketplace-плагин. Любой AI-а�
 
 ```bash
 # Добавить marketplace (один раз)
-claude /plugin marketplace add dodobrands/ai-hub
+claude plugin marketplace add dodobrands/ai-hub
 
 # Установить все инструменты:
-claude /plugin install buildin@ai-hub code-review@ai-hub discovery@ai-hub \
+claude plugin install buildin@ai-hub code-review@ai-hub discovery@ai-hub \
   genie@ai-hub holst@ai-hub hub-meta@ai-hub kaiten@ai-hub \
   reverse-product-analysis@ai-hub spike@ai-hub test-factory@ai-hub testops@ai-hub time@ai-hub
 
 # Установить конкретный плагин:
-claude /plugin install spike@ai-hub
-claude /plugin install kaiten@ai-hub
-claude /plugin install time@ai-hub
-claude /plugin install testops@ai-hub
+claude plugin install spike@ai-hub
+claude plugin install kaiten@ai-hub
+claude plugin install time@ai-hub
+claude plugin install testops@ai-hub
 ```
 
 **GitHub Copilot CLI:**
