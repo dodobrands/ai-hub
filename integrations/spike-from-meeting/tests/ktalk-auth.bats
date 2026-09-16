@@ -38,7 +38,7 @@ teardown() {
     rm -rf "$STUB_DIR" "$OUT_FILE"
 }
 
-@test "ktalk_init_auth: только ключ API → режим key" {
+@test "ktalk_init_auth: API key only yields key mode" {
     run bash -c "set -euo pipefail
         unset KTALK_SESSION_TOKEN
         export KTALK_TOKEN=k
@@ -49,7 +49,7 @@ teardown() {
     [ "$output" = "key" ]
 }
 
-@test "ktalk_init_auth: только cookie → режим session" {
+@test "ktalk_init_auth: cookie only yields session mode" {
     run bash -c "set -euo pipefail
         unset KTALK_TOKEN
         export KTALK_SESSION_TOKEN=s
@@ -60,7 +60,7 @@ teardown() {
     [ "$output" = "session" ]
 }
 
-@test "ktalk_init_auth: оба токена → приоритет у ключа API" {
+@test "ktalk_init_auth: with both tokens the API key wins" {
     run bash -c "set -euo pipefail
         export KTALK_TOKEN=k KTALK_SESSION_TOKEN=s
         . '$AUTH_SH'
@@ -72,7 +72,7 @@ teardown() {
 
 # Регрессия: раньше функция заканчивалась ложной проверкой `[ -n "$KTALK_SESSION_TOKEN" ]`,
 # её статус становился статусом функции и `set -e` молча убивал вызывающий скрипт.
-@test "ktalk_init_auth: не роняет вызывающий скрипт под set -e, когда cookie нет" {
+@test "ktalk_init_auth: does not kill the caller under set -e when there is no cookie" {
     run bash -c "set -euo pipefail
         unset KTALK_SESSION_TOKEN
         export KTALK_TOKEN=k
@@ -83,7 +83,7 @@ teardown() {
     [ "$output" = "alive" ]
 }
 
-@test "ktalk_fetch: ключ API работает — cookie не трогаем" {
+@test "ktalk_fetch: the API key works, the cookie is left alone" {
     run bash -c "set -euo pipefail
         export STUB_KEY_CODE=200 STUB_SESSION_CODE=200
         export KTALK_TOKEN=k KTALK_SESSION_TOKEN=s
@@ -95,7 +95,7 @@ teardown() {
     grep -q '"stub":"key"' "$OUT_FILE"
 }
 
-@test "ktalk_fetch: 401 по ключу → фоллбек на cookie" {
+@test "ktalk_fetch: 401 on the key falls back to the cookie" {
     run bash -c "set -euo pipefail
         export STUB_KEY_CODE=401 STUB_SESSION_CODE=200
         export KTALK_TOKEN=k KTALK_SESSION_TOKEN=s
@@ -107,7 +107,7 @@ teardown() {
     grep -q '"stub":"session"' "$OUT_FILE"
 }
 
-@test "ktalk_fetch: 403 по ключу → фоллбек и предупреждение в stderr" {
+@test "ktalk_fetch: 403 on the key falls back and warns on stderr" {
     run bash -c "set -euo pipefail
         export STUB_KEY_CODE=403 STUB_SESSION_CODE=200
         export KTALK_TOKEN=k KTALK_SESSION_TOKEN=s
@@ -118,7 +118,7 @@ teardown() {
     [[ "$output" == *"ключ API вернул HTTP 403"* ]]
 }
 
-@test "ktalk_fetch: cookie нет — 401 по ключу возвращается как есть" {
+@test "ktalk_fetch: with no cookie the key's 401 is returned as-is" {
     run bash -c "set -euo pipefail
         unset KTALK_SESSION_TOKEN
         export STUB_KEY_CODE=401
@@ -130,7 +130,7 @@ teardown() {
     [ "$output" = "401 key" ]
 }
 
-@test "ktalk_fetch: оба токена отвергнуты — статус последнего режима" {
+@test "ktalk_fetch: both tokens rejected yields the last mode's status" {
     run bash -c "set -euo pipefail
         export STUB_KEY_CODE=403 STUB_SESSION_CODE=401
         export KTALK_TOKEN=k KTALK_SESSION_TOKEN=s
@@ -141,7 +141,7 @@ teardown() {
     [ "$output" = "401 session" ]
 }
 
-@test "ktalk_have_auth: без токенов возвращает ошибку" {
+@test "ktalk_have_auth: returns an error with no tokens" {
     run bash -c "set -uo pipefail
         . '$AUTH_SH'
         KTALK_MODES=''

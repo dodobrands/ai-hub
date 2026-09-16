@@ -6,7 +6,7 @@
 полем "children" — их создаёт buildin-blocks.py с правильными parentId/subNodes.
 
 Usage:
-    md-to-blocks.py <markdown_file> [--shift-headings] > blocks.json
+    md-to-blocks.py <markdown_file> [--shift-headings] [--skip-h1] > blocks.json
     cat doc.md | md-to-blocks.py - [--shift-headings] > blocks.json
 
 Поддержка Markdown:
@@ -53,6 +53,11 @@ LINK_PARTS = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 # Известные языки кода → отображаемое имя в format.language (как делает Buildin).
 CODE_LANG_DISPLAY = {
+    # Встречается в отчётах по нагрузочным тестам и инфраструктурных заметках.
+    "kql": "Plain Text", "kusto": "Plain Text", "promql": "Plain Text",
+    "jsonnet": "Plain Text", "libsonnet": "Plain Text",
+    "hcl": "Plain Text", "terraform": "Plain Text", "ini": "Plain Text",
+    "cs": "C#", "csharp": "C#", "py": "Python",
     "mermaid": "Mermaid", "json": "JSON", "swift": "Swift", "python": "Python",
     "bash": "Bash", "shell": "Shell", "sh": "Shell", "js": "JavaScript",
     "javascript": "JavaScript", "ts": "TypeScript", "typescript": "TypeScript",
@@ -61,6 +66,19 @@ CODE_LANG_DISPLAY = {
     "sql": "SQL", "html": "HTML", "css": "CSS", "xml": "XML", "diff": "Diff",
     "markdown": "Markdown", "plain": "Plain Text",
 }
+
+
+def _nested(inner, enhancer_key):
+    """Разобрать содержимое жирного или курсивного участка и навесить оформление
+    на каждый вложенный сегмент, сохранив код и ссылки внутри."""
+    out = []
+    for seg in parse_inline(inner):
+        enh = dict(seg.get("enhancer") or {})
+        enh[enhancer_key] = True
+        seg = dict(seg)
+        seg["enhancer"] = enh
+        out.append(seg)
+    return out
 
 
 def parse_inline(text):
@@ -79,9 +97,12 @@ def parse_inline(text):
             if lp:
                 segments.append({"type": 3, "text": lp.group(1), "url": lp.group(2), "enhancer": {}})
         elif m.group("bold"):
-            segments.append({"type": 0, "text": m.group("bold")[2:-2], "enhancer": {"bold": True}})
+            # Внутри жирного может быть код или ссылка: **28 у `staff`**. Без
+            # рекурсии бэктики остаются в тексте буквально и попадают на
+            # страницу как разметка.
+            segments.extend(_nested(m.group("bold")[2:-2], "bold"))
         elif m.group("italic"):
-            segments.append({"type": 0, "text": m.group("italic")[1:-1], "enhancer": {"italic": True}})
+            segments.extend(_nested(m.group("italic")[1:-1], "italic"))
         pos = m.end()
     if pos < len(text):
         segments.append({"type": 0, "text": text[pos:], "enhancer": {}})
@@ -193,8 +214,67 @@ def code_data(lang, body):
         fmt["language"] = "Mermaid"
         fmt["codePreviewFormat"] = "preview"
     elif low:
-        fmt["language"] = CODE_LANG_DISPLAY.get(low, lang.strip().capitalize())
+        # Неизвестный язык отдаём как Plain Text: значение вроде "Kql" или
+        # "Promql" Buildin не знает, и подсветка пропадает молча — блок
+        # выглядит обычным текстом, а причину по странице не увидеть.
+        fmt["language"] = CODE_LANG_DISPLAY.get(low, "Plain Text")
     return {"language": None, "format": fmt, "segments": seg}
+
+
+# Ширина колонки в px: Buildin не подгоняет её под содержимое, поэтому
+# считаем сами по самой длинной ячейке. Коэффициенты снятыми замерами по
+# отрендеренной странице: 26 px отступов плюс 8.4 px на символ, обрезка длины
+# на 88 символах — дальше колонка всё равно переносит текст.
+COL_MIN_WIDTH = 120
+COL_MAX_WIDTH = 620
+TABLE_WIDTH_BUDGET = 1240   # ширина контента страницы при pageFixedWidth: false
+
+
+def visible_len(cell):
+    """Длина отрендеренного текста ячейки.
+
+    Мерить по сырому markdown нельзя: ссылка занимает ширину своей подписи, а
+    не URL. Иначе колонка с длинными ссылками выбирает максимум и выдавливает
+    содержательные колонки на минимум — ровно тот перекос, ради которого
+    ширины и считаются. Длину берём у того же parse_inline, что строит
+    сегменты: вторая логика разбора неизбежно разойдётся с первой.
+    """
+    return sum(len(s.get("text", "")) for s in parse_inline(cell))
+
+
+def column_widths(rows, ncols):
+    """Ширины колонок, уложенные в бюджет страницы."""
+    # От 11 колонок бюджет недостижим при фиксированном поле в 120 px, и сжатие
+    # упиралось в него, оставляя таблицу шире страницы. Для широких таблиц пол
+    # опускается до равной доли бюджета: узкие колонки лучше, чем таблица,
+    # уехавшая за край.
+    floor = min(COL_MIN_WIDTH, TABLE_WIDTH_BUDGET // ncols) if ncols else COL_MIN_WIDTH
+    w = []
+    for c in range(ncols):
+        longest = max((visible_len(r[c]) if c < len(r) else 0) for r in rows) if rows else 0
+        raw = round(26 + 8.4 * min(longest, 88))
+        w.append(max(floor, min(COL_MAX_WIDTH, raw)))
+
+    # Сжимать можно только то, что выше минимума: если сжать пропорционально
+    # и потом поднять узкие колонки до минимума, сумма снова выйдет за бюджет.
+    for _ in range(20):
+        if sum(w) <= TABLE_WIDTH_BUDGET:
+            break
+        flex = [x - floor if x > floor else 0 for x in w]
+        flex_sum = sum(flex)
+        if not flex_sum:
+            break                      # все колонки на минимуме — сжимать нечего
+        excess = sum(w) - TABLE_WIDTH_BUDGET
+        w = [max(floor, round(x - excess * f / flex_sum)) if f else x
+             for x, f in zip(w, flex)]
+
+    # Округление по колонкам даёт ±1 px, и сумма выходит за бюджет на единицу.
+    over = sum(w) - TABLE_WIDTH_BUDGET
+    if over > 0:
+        widest = max(range(len(w)), key=lambda i: w[i])
+        if w[widest] - over >= floor:
+            w[widest] -= over
+    return w
 
 
 def parse_table(lines, start):
@@ -220,12 +300,17 @@ def parse_table(lines, start):
         r = r + [""] * (ncols - len(r))
         cp = {col_ids[ci]: parse_inline(cell) for ci, cell in enumerate(r)}
         children.append({"type": 28, "data": {"collectionProperties": cp}})
+    widths = column_widths(rows, ncols)
     table = {
         "type": 27,
         "data": {"segments": [], "format": {
             "commentAlignment": "top",
             "tableBlockRowHeader": True,
+            "tableBlockRanges": [],
             "tableBlockColumnOrder": col_ids,
+            "tableBlockColumnFormat": {
+                cid: {"width": widths[ci]} for ci, cid in enumerate(col_ids)
+            },
         }},
         "children": children,
     }
@@ -239,8 +324,11 @@ def heading_level(hashes, shift):
     return n
 
 
-def parse_md(md, shift=False):
-    """Markdown → плоский список блоков (с пометкой collapse у заголовков)."""
+def parse_md(md, shift=False, skip_h1=False):
+    """Markdown → плоский список блоков (с пометкой collapse у заголовков).
+
+    skip_h1 выбрасывает ведущий H1 — он дублирует заголовок самой страницы.
+    """
     blocks = []
     lines = md.split("\n")
     i = 0
@@ -278,6 +366,11 @@ def parse_md(md, shift=False):
         # Заголовок
         mh = re.match(r"^(#{1,6})\s+(.+)$", line)
         if mh:
+            # Снимаем только ведущий H1: он дублирует имя страницы. H1 ниже
+            # по тексту — осмысленный раздел, и выбрасывать его нельзя.
+            if skip_h1 and len(mh.group(1)) == 1 and not blocks:
+                i += 1
+                continue
             level = heading_level(mh.group(1), shift)
             blocks.append({
                 "type": 7,
@@ -380,11 +473,12 @@ def _clean(b):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     shift = "--shift-headings" in sys.argv
+    skip_h1 = "--skip-h1" in sys.argv
     if not args:
         print("Usage: md-to-blocks.py <markdown_file|-> [--shift-headings]", file=sys.stderr)
         sys.exit(1)
     src = sys.stdin.read() if args[0] == "-" else open(args[0], encoding="utf-8").read()
-    blocks = group_collapses(parse_md(src, shift=shift))
+    blocks = group_collapses(parse_md(src, shift=shift, skip_h1=skip_h1))
     print(json.dumps(blocks, ensure_ascii=False, indent=2))
 
 

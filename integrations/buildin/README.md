@@ -13,6 +13,8 @@ integrations/buildin/
 │   ├── buildin-pages.sh      # Level 2: CRUD + read (markdown) + delete-block
 │   ├── buildin-blocks.py     # Построитель транзакций для дерева блоков (вложенность)
 │   ├── md-to-blocks.py       # Конвертер Markdown → блоки (таблицы, toggle, mermaid)
+│   ├── buildin-publish-md.py # Движок publish-md: батчи, ретраи, режим --replace
+│   ├── buildin-verify-md.py  # Сверка опубликованной страницы с исходным markdown
 │   ├── buildin-nav.sh        # Level 2: Навигация и поиск по дереву
 │   ├── buildin-shadow.sh     # Level 2: Shadow-индекс (локальный кеш)
 │   └── buildin-login.sh      # Проверка и сохранение JWT-токена
@@ -91,6 +93,10 @@ JWT-токен живёт ~30 дней.
 # Добавить текст
 ./integrations/buildin/scripts/buildin-pages.sh append-text <id|url> "Новый параграф"
 
+# Опубликовать markdown-файл (по умолчанию дописывает в конец)
+./integrations/buildin/scripts/buildin-pages.sh publish-md <id|url> doc.md
+./integrations/buildin/scripts/buildin-pages.sh publish-md <id|url> doc.md --replace
+
 # Добавить блоки (JSON)
 ./integrations/buildin/scripts/buildin-pages.sh append-blocks <id|url> '<json_blocks>'
 
@@ -114,11 +120,36 @@ JWT-токен живёт ~30 дней.
 `read` (round-trip): `#`→level 1, `##`→level 2, `###`→level 3.
 
 ```bash
-# Markdown → блоки → публикация в конец страницы
 DIR=integrations/buildin/scripts
+
+# Обычный путь: одной командой, блоки дописываются в конец страницы
+bash $DIR/buildin-pages.sh publish-md <id|url> doc.md
+
+# Перепубликация документа целиком: содержимое страницы заменяется,
+# ссылки на дочерние страницы сохраняются
+bash $DIR/buildin-pages.sh publish-md <id|url> doc.md --replace
+
+# Тот же конвертер отдельно — когда блоки нужны как JSON для точечной вставки
 python3 $DIR/md-to-blocks.py doc.md > /tmp/blocks.json
-bash $DIR/buildin-pages.sh append-blocks <id|url> "$(cat /tmp/blocks.json)"
+bash $DIR/buildin-pages.sh insert-blocks-before <id|url> <block_uuid> "$(cat /tmp/blocks.json)"
 ```
+
+```bash
+# Сверить опубликованную страницу с исходником (рассчитано на --replace)
+python3 $DIR/buildin-verify-md.py <id|url> doc.md
+python3 $DIR/buildin-verify-md.py <id|url> doc.md --keep-h1   # если H1 публиковали
+```
+
+Сверка сравнивает страницу целиком с одним файлом, поэтому осмысленна после
+`--replace`. После append лишнее на странице — норма, и такие расхождения
+помечаются отдельной пометкой, а не выглядят поломкой.
+
+`publish-md` добавляет к конвертеру то, чего нет в голом `append-blocks`: разбиение
+на транзакции по 25 блоков, повтор сетевых обрывов и транзиентных ответов сервера
+(429, 5xx), безопасный порядок замены — новые блоки заливаются первыми, старые
+удаляются последними, поэтому сорванная публикация не оставляет страницу пустой, —
+и сохранение блоков-ссылок на дочерние страницы при `--replace`. Операции собирает
+всё тот же `buildin-blocks.py`.
 
 Поддерживаемые блоки:
 

@@ -62,7 +62,32 @@ segments() {
     python3 "$SCRIPT" - | python3 "$SANDBOX/segments.py" "$1"
 }
 
-@test "перенесённый буллет остаётся одним пунктом, хвост клеится через пробел" {
+# markdown со stdin → плоский слепок, конвертер с --skip-h1
+summary_skip_h1() {
+    python3 "$SCRIPT" - --skip-h1 | python3 "$SANDBOX/summary.py"
+}
+
+# markdown со stdin → суммарная ширина первой таблицы
+total_width() {
+    python3 "$SCRIPT" - | python3 -c '
+import json, sys
+fmt = json.load(sys.stdin)[0]["data"]["format"]
+cw = fmt["tableBlockColumnFormat"]
+print(sum(cw[c]["width"] for c in fmt["tableBlockColumnOrder"]))
+'
+}
+
+# markdown со stdin → ширины колонок первой таблицы, по порядку колонок
+widths() {
+    python3 "$SCRIPT" - | python3 -c '
+import json, sys
+fmt = json.load(sys.stdin)[0]["data"]["format"]
+cw = fmt["tableBlockColumnFormat"]
+print(" ".join(str(cw[c]["width"]) for c in fmt["tableBlockColumnOrder"]))
+'
+}
+
+@test "wrapped bullet stays one item, tail joined with a space" {
     run summary <<'MD'
 - **Первый пункт:** начало пункта, которое не влезло в одну строку и поэтому
   продолжается с отступом в две позиции.
@@ -78,7 +103,7 @@ MD
     [[ "$output" != *" 1 "* ]]
 }
 
-@test "перенос в нумерованном пункте: один блок type 5" {
+@test "wrap inside a numbered item yields one type 5 block" {
     run summary <<'MD'
 1. Первый шаг, у которого описание не влезло в одну строку и
    поэтому продолжено с отступом.
@@ -91,7 +116,7 @@ MD
     [ "${lines[1]}" = "1 5 Второй шаг." ]
 }
 
-@test "перенос в todo-пункте: один блок type 3, checked сохраняется" {
+@test "wrap inside a todo item yields one type 3 block, checked preserved" {
     run summary <<'MD'
 - [x] Сделанная задача с длинным описанием, которое перенесено
       на следующую строку.
@@ -113,7 +138,7 @@ MD
     [ "$output" = "True" ]
 }
 
-@test "настоящая вложенность не ломается: маркер с отступом остаётся дочерним" {
+@test "real nesting survives: an indented marker stays a child" {
     run summary <<'MD'
 - Родительский пункт
   - Вложенный пункт
@@ -131,7 +156,7 @@ MD
     [ "${lines[4]}" = "1 4 Второй родительский пункт" ]
 }
 
-@test "вложенный пункт со своим переносом клеится к вложенному, не к родителю" {
+@test "a nested item wrapping joins the nested item, not the parent" {
     run summary <<'MD'
 - Родительский пункт
   - Вложенный пункт с описанием, которое не влезло
@@ -144,7 +169,7 @@ MD
     [ "${lines[1]}" = "0.0 4 Вложенный пункт с описанием, которое не влезло в одну строку." ]
 }
 
-@test "inline-разметка через стык переноса собирается в один сегмент" {
+@test "inline markup spanning the wrap collapses into one segment" {
     run segments 0 <<'MD'
 - начало **жирный
   текст** и `моно
@@ -162,7 +187,7 @@ MD
     [ "${lines[6]}" = "-  конец" ]
 }
 
-@test "абзац после списка через пустую строку остаётся отдельным параграфом" {
+@test "a paragraph after a blank line stays a separate paragraph" {
     run summary <<'MD'
 - Пункт списка с переносом, который
   продолжается ниже.
@@ -176,7 +201,7 @@ MD
     [ "${lines[1]}" = "1 1 Это уже обычный абзац, а не продолжение пункта." ]
 }
 
-@test "другие конструкции после переноса не всасываются в пункт" {
+@test "other constructs after a wrap are not swallowed into the item" {
     run summary <<'MD'
 - Пункт с переносом, который
   продолжается ниже.
@@ -190,7 +215,7 @@ MD
     [ "${lines[1]}" = "1 27 " ]
 }
 
-@test "выноска: каждая строка > остаётся отдельной строкой (поведение не менялось)" {
+@test "blockquote: every > line stays its own line (behaviour unchanged)" {
     cat > "$SANDBOX/callout.md" <<'MD'
 > **Источник:** запись встречи
 > **Участники:** трое
@@ -207,7 +232,7 @@ print(json.dumps(\"\".join(s[\"text\"] for s in block[\"data\"][\"segments\"]), 
     [[ "${lines[1]}" == *'\n'* ]]
 }
 
-@test "граница: хвост БЕЗ отступа не приклеивается (истинный lazy continuation не поддержан)" {
+@test "boundary: an unindented tail does not join (true lazy continuation unsupported)" {
     # CommonMark склеил бы и такую строку, но здесь она осознанно оставлена
     # отдельным параграфом: без отступа неотличимо от начала нового абзаца.
     run summary <<'MD'
@@ -218,4 +243,69 @@ MD
     [ "$status" -eq 0 ]
     [ "${lines[0]}" = "0 4 Пункт списка, продолжение которого" ]
     [ "${lines[1]}" = "1 1 не имеет отступа вообще." ]
+}
+
+# --skip-h1 снимает заголовок страницы, дублирующий её имя, а не размечает
+# документ. H1 ниже по тексту — уже осмысленный раздел, и он должен уцелеть.
+@test "skip-h1 drops the leading H1 only, later H1 survives" {
+    run summary_skip_h1 <<'MD'
+# Имя страницы
+
+Вступление.
+
+# Раздел первого уровня
+
+Тело раздела.
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 3 ]
+    [ "${lines[0]}" = "0 1 Вступление." ]
+    [ "${lines[1]}" = "1 7 Раздел первого уровня" ]
+    [ "${lines[2]}" = "2 1 Тело раздела." ]
+}
+
+@test "skip-h1 keeps an H1 that does not lead the document" {
+    run summary_skip_h1 <<'MD'
+Абзац раньше заголовка.
+
+# Не заголовок страницы
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[1]}" = "1 7 Не заголовок страницы" ]
+}
+
+# Ширина считается по отрендеренному тексту: подпись ссылки занимает место,
+# а URL — нет. Иначе колонка со ссылками съедает бюджет, а содержательные
+# колонки прижимаются к минимуму — ровно наоборот тому, что нужно.
+@test "column width follows visible text, not markdown source" {
+    run widths <<'MD'
+| Ссылка | Описание работы |
+|---|---|
+| [акт](https://example.com/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/11112222-3333) | коротко |
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    link_w=$(echo "$output" | cut -d' ' -f1)
+    text_w=$(echo "$output" | cut -d' ' -f2)
+    # "Описание работы" (15) длиннее, чем "Ссылка" (6) и подпись "акт" (3)
+    [ "$text_w" -gt "$link_w" ]
+    # и колонка со ссылкой не должна упираться в максимум из-за длины URL
+    [ "$link_w" -lt 620 ]
+}
+
+# Широкая таблица должна укладываться в страницу сама: пол в 120 px на колонку
+# делал бюджет недостижимым от 11 колонок, и сверка вечно репортила дефект,
+# которого генератор не мог избежать.
+@test "a wide table is squeezed into the page budget" {
+    run total_width <<'MD'
+| c01 | c02 | c03 | c04 | c05 | c06 | c07 | c08 | c09 | c10 | c11 | c12 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| v01 | v02 | v03 | v04 | v05 | v06 | v07 | v08 | v09 | v10 | v11 | v12 |
+MD
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [ "$output" -le 1240 ]
 }
