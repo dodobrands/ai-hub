@@ -11,6 +11,7 @@ on:
     paths:
       - 'integrations/**'
       - 'tests/**'
+      - '.claude-plugin/**'
       - '.github/workflows/shell-tests.yml'
   push:
     branches:
