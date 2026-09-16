@@ -31,7 +31,7 @@
     {
       "name": "kaiten",
       "description": "Kaiten board automation tools — cards, columns, properties, comments",
-      "version": "1.1.0",
+      "version": "1.2.1",
       "author": {
         "name": "AI Hub Contributors"
       },
@@ -42,7 +42,7 @@
     {
       "name": "time",
       "description": "Time (Mattermost) integration — read/write channels, messages, threads with dual auth (bot + personal)",
-      "version": "1.1.0",
+      "version": "1.1.4",
       "author": {
         "name": "AI Hub Contributors"
       },
@@ -108,7 +108,7 @@
     {
       "name": "hub-meta",
       "description": "AI Hub meta-tools — setup wizard, create new commands, run session retrospectives, update subtree from upstream",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "author": {
         "name": "AI Hub Contributors"
       },
@@ -130,7 +130,7 @@
     {
       "name": "testops",
       "description": "Allure TestOps integration — test cases, launches, defects, test plans, jobs via REST API",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "AI Hub Contributors"
       },
@@ -141,7 +141,7 @@
     {
       "name": "spike-from-meeting",
       "description": "Turn a meeting recording (video + transcript) into a markdown artifact with context-verified screenshots at timecodes — recap, spike, plan, instruction or dual-artifact. Supports Kontur.Talk API for auto-fetching transcript and video.",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "author": {
         "name": "AI Hub Contributors"
       },
