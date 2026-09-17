@@ -57,7 +57,7 @@ copilot plugin install spike@ai-hub
 copilot plugin install testops@ai-hub
 ```
 
-Доступные плагины: `buildin`, `code-review`, `discovery`, `genie`, `holst`, `hub-meta`, `kaiten`, `reverse-product-analysis`, `spike`, `test-factory`, `testops`, `time`.
+Доступные плагины: `buildin`, `code-review`, `discovery`, `genie`, `holst`, `hub-meta`, `kaiten`, `reverse-product-analysis`, `spike`, `test-factory`, `testops`, `time` (⚠️ deprecated — см. `dodo-time`).
 
 ### Через git clone или zip + setup
 
@@ -90,7 +90,7 @@ bash integrations/hub-meta/scripts/setup.sh next
 | `KAITEN_DOMAIN`, `TIME_BASE_URL`, `BUILDIN_SPACE_ID` | Общий конфиг команды — лежит на странице Buildin `https://buildin.ai/c7ec2023-9025-4c09-be09-e6f54cb07f7e` (если команда использует этот шаблон). Или спроси коллег. |
 | `KAITEN_TOKEN` | Kaiten → Настройки профиля → API/Интеграции → Создать токен |
 | `BUILDIN_UI_TOKEN` | `/ai-hub:buildin-login` — browser SSO |
-| `TIME_TOKEN` | `/ai-hub:time-login` — browser SSO |
+| `TIME_TOKEN` | `/ai-hub:time-login` — browser SSO. ⚠️ Нужен только для deprecated-плагина `time`; у `dodo-time` авторизация через OAuth, переменная не нужна |
 | `GENIE_TOKEN` | Опционально, получить у админа данных |
 | `TESTOPS_URL`, `TESTOPS_TOKEN` | Allure TestOps → Settings → API Tokens → Generate Token |
 
@@ -150,7 +150,7 @@ integrations/
 
 - **[Kaiten](integrations/kaiten/)** — универсальный клиент для Kaiten API. Чтение и запись карточек, комментариев, чек-листов, свойств, структуры досок и колонок. Фундамент для большинства других интеграций.
 
-- **[Time](integrations/time/)** `/ai-hub:time-chat` — полный доступ к мессенджеру Time (Mattermost). Чтение каналов и тредов, отправка сообщений. Логин через browser-based SSO — токен не попадает в контекст LLM.
+- **[Time](integrations/time/)** `/ai-hub:time-chat` — ⚠️ **deprecated**, переехал в плагин [`dodo-time`](https://hr-platform.dodois.io/#/ai-hub/dodo-time) (MCP + OAuth). Пока работает и не удаляется: чтение каналов и тредов, отправка сообщений, логин через browser-based SSO. Отправка сообщений есть только здесь — в `dodo-time` её нет намеренно.
 
 - **[Buildin](integrations/buildin/)** `/ai-hub:buildin-read` `/ai-hub:buildin-publish` — чтение и запись во внутреннюю wiki Buildin.ai. Рекурсивное раскрытие вложенных блоков, навигация по дереву, поиск по названию.
 
