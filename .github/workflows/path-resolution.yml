@@ -1,8 +1,7 @@
 name: path resolution
 
-# Гейт: командные .md и скиллы (buildin, kaiten, time) должны резолвить путь к
-# скриптам во всех сценариях потребления хаба (standalone / subtree-overlay /
-# marketplace-install; для скиллов — ещё symlink-в-~/.claude и Copilot _direct).
+# Гейт: командные .md (buildin, kaiten) должны резолвить путь к скриптам во всех
+# сценариях потребления хаба (standalone / subtree-overlay / marketplace-install).
 # Тест печатает матрицу по сценариям и валит job ненулевым exit.
 
 on:
@@ -12,9 +11,6 @@ on:
       - 'integrations/buildin/scripts/**'
       - 'integrations/kaiten/commands/**'
       - 'integrations/kaiten/scripts/**'
-      - 'integrations/time/commands/**'
-      - 'integrations/time/skills/**'
-      - 'integrations/time/scripts/**'
       - 'tests/path-resolution.sh'
       - '.github/workflows/path-resolution.yml'
   push:

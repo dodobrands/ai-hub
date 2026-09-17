@@ -74,10 +74,13 @@ done_banner() {
     cat <<EOF
 STATUS: DONE
 
-AI Hub установлен. Buildin, Time и Kaiten уже работают в этом же сеансе.
+AI Hub установлен. Buildin и Kaiten уже работают в этом же сеансе.
+
+Коннектор Time в ai-hub больше не входит — он переехал в отдельный плагин dodo-time
+(MCP, OAuth). Если юзеру нужен Time, скажи поставить его: claude plugin install
+dodo-time@dodo-ai-marketplace
 
 Предложи юзеру что-нибудь попробовать прямо сейчас (без перезапуска), например:
-  • «прочитай мне последние 20 сообщений в time-канале dev»
   • «покажи мои открытые карточки в Kaiten»
   • «открой страницу Buildin <ссылка> и суммаризируй»
   • «сделай spike по <карточка Kaiten>»
@@ -95,7 +98,7 @@ Holst: MCP установлен. Чтобы Holst-скиллы (/ai-hub:holst-ex
   >  рестарта первое что нужно — залогиниться в Holst (один раз): скажи «настрой Holst»,
   >  я открою app.holst.so через MCP и ты зайдёшь через Google SSO.»
 
-Если Holst сейчас не нужен — рестарт можно отложить. Buildin/Time/Kaiten работают
+Если Holst сейчас не нужен — рестарт можно отложить. Buildin/Kaiten работают
 без него.
 EOF
             ;;
@@ -103,7 +106,7 @@ EOF
             cat <<EOF
 Holst: ⚠️ MCP установить не получилось (нет npx / нет claude CLI / permission denied —
 смотри лог выше). Из-за этого /ai-hub:holst-export / /ai-hub:holst-write РАБОТАТЬ НЕ
-БУДУТ. Остальное (Buildin, Time, Kaiten, spike, discovery, code-review и т.д.) — ок.
+БУДУТ. Остальное (Buildin, Kaiten, spike, discovery, code-review и т.д.) — ок.
 
 Если захочется починить Holst позже — установи Chrome DevTools MCP руками:
   claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest
@@ -144,7 +147,7 @@ EOF
 }
 
 # Step 6 (was 1) — Chrome DevTools MCP. Автоматическая установка.
-# Buildin/Time уже работают через cookie extraction; MCP нужен ТОЛЬКО для Holst.
+# Buildin уже работает через cookie extraction; MCP нужен ТОЛЬКО для Holst.
 # Агент тихо ставит MCP (если нет); при неудаче — помечает как skipped и идёт
 # к DONE с предупреждением что Holst работать не будет.
 check_1() { is_marked mcp_ready || is_skipped install_mcp; }
@@ -153,7 +156,7 @@ say_1() {
 Финальный шаг — Chrome DevTools MCP. Автоматический, без вопросов юзеру.
 
 MCP нужен ТОЛЬКО для /ai-hub:holst-export / /ai-hub:holst-write (доски Holst
-работают через живую страницу внутри MCP-браузера). Buildin, Time, Kaiten и
+работают через живую страницу внутри MCP-браузера). Buildin, Kaiten и
 вся остальная функциональность УЖЕ работает без MCP.
 
 АЛГОРИТМ:
@@ -230,11 +233,11 @@ EOF
 
 # Step 3 — подтянуть конфиг команды из Buildin
 check_3() {
-    $ENV_MGR has KAITEN_DOMAIN && $ENV_MGR has TIME_BASE_URL
+    $ENV_MGR has KAITEN_DOMAIN
 }
 say_3() {
     cat <<EOF
-Подтяни URL-ы команды (Kaiten, Time). Юзеру ничего говорить не нужно —
+Подтяни URL-ы команды (Kaiten). Юзеру ничего говорить не нужно —
 молча сделай шаг и переходи дальше.
 
 Действие:
@@ -243,53 +246,12 @@ say_3() {
 Распарси строки \`[A-Z_]+=<значение>\`, сохрани каждую:
   $ENV_MGR set <KEY> "<VALUE>"
 
-Минимум: KAITEN_DOMAIN, TIME_BASE_URL. BUILDIN_SPACE_ID — опционально.
+Минимум: KAITEN_DOMAIN. BUILDIN_SPACE_ID — опционально.
 
 FALLBACK (если страница 404/403/пустая — команда не использует шаблон):
   Спроси юзера в живом виде, без технических терминов:
   > «Какой у вашей команды домен Kaiten? (пример: yourcompany.kaiten.ru)»
-  > «Какой URL у Time? (пример: https://time.yourcompany.io)»
   Сохрани через \`$ENV_MGR set\`.
-
-После: $0 next
-EOF
-}
-
-# Step 4 — логин в Time
-check_4() {
-    bash "$SUBTREE_ROOT/integrations/time/scripts/time-login.sh" check 2>&1 | grep -q '^ok '
-}
-say_4() {
-    local time_url
-    time_url=$($ENV_MGR get TIME_BASE_URL 2>/dev/null || echo '\$TIME_BASE_URL')
-
-    cat <<EOF
-Логин в Time. Механика та же что для Buildin — тихо, без окон.
-
-USER-FACING (скажи коротко):
-
-  > «Теперь Time. Если ты залогинен в Time в том же Chrome — сам возьму сессию.
-  >  Keychain снова попросит пароль — жми **«Разрешить только сейчас»**.»
-
-ЗАПУСК:
-  bash integrations/time/scripts/time-login.sh cookie
-
-Успех → \`ok @<username> (via chrome/Profile N)\` → $0 next.
-
-ОШИБКИ (переводи юзеру дружелюбно):
-  • \`error:no_cookie_found\` → «залогинься в Time в браузере, скажи готово», повтори.
-  • \`error:validation_failed\` → «перелогинься в Time — сессия протухла», повтори.
-  • \`error:TIME_BASE_URL_not_set\` → Step 3 не прошёл, вернись туда.
-
-FALLBACK (только если primary сломался — Safari и т.п.):
-
-  Скажи юзеру:
-  > «Открой $time_url, залогинься. F12 → Application → Cookies → найди
-  >  MMAUTHTOKEN → скопируй value, пришли мне.»
-
-  Сохрани:
-    $ENV_MGR set TIME_TOKEN "<token>"
-    bash integrations/time/scripts/time-login.sh check
 
 После: $0 next
 EOF
@@ -335,7 +297,7 @@ say_6() {
     kaiten_domain=$($ENV_MGR get KAITEN_DOMAIN 2>/dev/null || echo '<KAITEN_DOMAIN>')
 
     cat <<EOF
-Kaiten token — опциональный. В отличие от Buildin/Time, у Kaiten нет cookie-based
+Kaiten token — опциональный. В отличие от Buildin, у Kaiten нет cookie-based
 API, токен выдаётся только через UI профиля. Автоматом его взять нельзя — юзер
 должен скопировать сам.
 
@@ -387,7 +349,7 @@ say_7() {
     fi
 
     cat <<EOF
-Файл team-config.json — ID досок Kaiten, колонок, каналов Time, кастомных свойств.
+Файл team-config.json — ID досок Kaiten, колонок, кастомных свойств.
 Без него некоторые скиллы будут каждый раз спрашивать эти ID у юзера.
 
 Шаблон: ${example:-(не найден — см. README)}
@@ -396,7 +358,7 @@ say_7() {
 1. cp $example team-config.json   (если шаблон найден)
 2. Спроси юзера: «Заполнить сейчас вместе (я задам по одному вопросу) или отложить?»
    — "вместе": запрашивай по одному полю (kaiten.space_id, kaiten.boards.sprint.id,
-     колонки sprint_backlog/in_progress/doing/on_hold/done, time.channels),
+     колонки sprint_backlog/in_progress/doing/on_hold/done),
      записывай через jq:
 
        tmp=\$(mktemp)
@@ -414,21 +376,19 @@ EOF
 # ---------- commands ----------
 # Step execution order. MCP+Holst are moved to the end because they are
 # OPTIONAL (MCP is only needed for Holst). All the zero-MCP logins (Buildin,
-# Time, Kaiten) complete first so the setup is usable even if MCP install
+# Kaiten) complete first so the setup is usable even if MCP install
 # fails or the user doesn't want Holst.
-STEP_ORDER=(0 2 3 4 6 7 1 5)
+STEP_ORDER=(0 2 3 6 7 1 5)
 STEP_NAMES=(
     "migrate_env_local"
     "buildin_login"
     "fetch_team_config"
-    "time_login"
     "kaiten_token"
     "team_config"
     "install_mcp"
     "holst_login"
 )
 STEP_NOTES=(
-    ""
     ""
     ""
     ""
@@ -512,7 +472,7 @@ Usage:
   $0 skip <step_name>     — mark step skipped by user
   $0 reset                — clear state file (re-run from scratch)
 
-Steps: mcp_ready, buildin_login, fetch_team_config, time_login, holst_login/holst,
+Steps: mcp_ready, buildin_login, fetch_team_config, holst_login/holst,
        kaiten_token, team_config
 
 Agent contract: call \`$0 next\` in a loop until stdout's first line is "STATUS: DONE".

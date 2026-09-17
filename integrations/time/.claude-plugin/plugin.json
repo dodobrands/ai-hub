@@ -1,7 +1,7 @@
 {
   "name": "time",
-  "version": "1.1.4",
-  "description": "Time (Mattermost) API client — чтение каналов, сообщений, тредов",
+  "version": "2.0.0",
+  "description": "DEPRECATED — коннектор Time переехал в плагин dodo-time (MCP). Этот плагин больше ничего не умеет",
   "author": {
     "name": "AI Hub Contributors"
   }

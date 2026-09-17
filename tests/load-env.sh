@@ -48,15 +48,15 @@ echo "== hub_load_env (репо / overlay / профиль) =="
 # 1.1 Кеш-раскладка: .env лежит выше по дереву — берём его, профиль не трогаем.
 H="$TMP/c1/home"
 CACHE="$H/.claude/plugins/cache/ai-hub"
-mkdir -p "$CACHE/time/1.1.3/scripts"
+mkdir -p "$CACHE/kaiten/1.1.3/scripts"
 mkenv "$CACHE/.env" from_cache
 mkenv "$H/.ai-hub/.env" from_profile
 check "кеш-раскладка: .env вверх по дереву" \
-      "from_cache" "$(run_load "$CACHE/time/1.1.3/scripts" "$H")"
+      "from_cache" "$(run_load "$CACHE/kaiten/1.1.3/scripts" "$H")"
 
 # 1.2 Marketplace-раскладка: вверх .env нет (кеш — соседняя ветка), берём профиль.
 H="$TMP/c2/home"
-MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/time/scripts"
+MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/kaiten/scripts"
 mkdir -p "$MKT"
 mkenv "$H/.claude/plugins/cache/ai-hub/.env" from_cache_profile
 check "marketplace-раскладка: фолбэк на ~/.claude/plugins/cache/ai-hub/.env" \
@@ -65,16 +65,16 @@ check "marketplace-раскладка: фолбэк на ~/.claude/plugins/cache
 # 1.3 Репозиторный .env сильнее профиля.
 H="$TMP/c3/home"
 REPO_DIR="$TMP/c3/team-repo"
-mkdir -p "$REPO_DIR/integrations/time/scripts"
+mkdir -p "$REPO_DIR/integrations/kaiten/scripts"
 mkenv "$REPO_DIR/.env" from_repo
 mkenv "$H/.ai-hub/.env" from_profile
 check "репозиторный .env приоритетнее профиля" \
-      "from_repo" "$(run_load "$REPO_DIR/integrations/time/scripts" "$H")"
+      "from_repo" "$(run_load "$REPO_DIR/integrations/kaiten/scripts" "$H")"
 
 # 1.4 Порядок внутри профиля: XDG → ~/.ai-hub → кеш плагинов.
 H="$TMP/c4/home"
 XDG="$TMP/c4/xdg"
-MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/time/scripts"
+MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/kaiten/scripts"
 mkdir -p "$MKT"
 mkenv "$XDG/ai-hub/.env" from_xdg
 mkenv "$H/.ai-hub/.env" from_dot_ai_hub
@@ -83,7 +83,7 @@ check "профиль: XDG_CONFIG_HOME впереди остальных" \
       "from_xdg" "$(run_load "$MKT" "$H" "$XDG")"
 
 H="$TMP/c5/home"
-MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/time/scripts"
+MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/kaiten/scripts"
 mkdir -p "$MKT"
 mkenv "$H/.ai-hub/.env" from_dot_ai_hub
 mkenv "$H/.claude/plugins/cache/ai-hub/.env" from_cache_profile
@@ -92,7 +92,7 @@ check "профиль: ~/.ai-hub впереди кеша плагинов" \
 
 # 1.5 Нигде нет .env → hub_load_env возвращает 1 (вывод пустой).
 H="$TMP/c6/home"
-MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/time/scripts"
+MKT="$H/.claude/plugins/marketplaces/ai-hub/integrations/kaiten/scripts"
 mkdir -p "$MKT"
 check "нет .env нигде → hub_load_env != 0" "" "$(run_load "$MKT" "$H")"
 

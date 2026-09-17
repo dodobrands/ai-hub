@@ -30,7 +30,7 @@ bash integrations/hub-meta/scripts/setup.sh next
 │   ├── kaiten/                   # Kaiten API клиент              → README.md
 │   ├── buildin/                  # Buildin wiki клиент (UI API)   → README.md
 │   ├── buildin-bot-api/          # Buildin wiki клиент (Bot API)  → README.md
-│   ├── time/                     # Time (Mattermost) клиент       → README.md
+│   ├── time/                     # DEPRECATED → плагин dodo-time  → README.md
 │   ├── genie/                    # Databricks Genie (аналитика)   → README.md
 │   ├── spike/                    # Spike-исследования             → README.md
 │   ├── discovery/                # Product Discovery (9 фаз)
@@ -87,7 +87,7 @@ Claude Code CLI ищет slash-команды в `.claude/commands/`. Коман
 | Источник | Чтение | Запись | Когда использовать |
 |----------|--------|--------|--------------------|
 | **Kaiten** — таск-трекер (аналог Jira/Linear) | скрипты `integrations/kaiten/scripts/` | скрипты `integrations/kaiten/` | Карточки, комментарии, чек-листы, перемещение по колонкам, работа с досками |
-| **Time** — мессенджер (аналог Slack), на базе Mattermost | `/ai-hub:time-chat` | `/ai-hub:time-chat` | Чтение тредов/каналов для контекста, отправка статусов и вопросов |
+| **Time** — мессенджер (аналог Slack) | инструменты плагина `dodo-time` (`time_*`) | — | Чтение каналов/тредов/поиска. В ai-hub больше не входит: `claude plugin install dodo-time@dodo-ai-marketplace`. Запись не поддерживается |
 | **Buildin (UI API)** — база знаний (аналог Notion) | `/ai-hub:buildin-read` или скрипты `integrations/buildin/scripts/buildin-pages.sh read <url\|id>` | `/ai-hub:buildin-publish` | Чтение документации, публикация результатов. JWT-токен из Google SSO, видит все страницы пользователя. Логин: `/ai-hub:buildin-login` |
 | **Buildin (Bot API)** — база знаний (Official API) | `/ai-hub:buildin-bot-read` или скрипты `integrations/buildin-bot-api/scripts/buildin-bot-pages.sh read <url\|id>` | скрипты `integrations/buildin-bot-api/scripts/buildin-bot-pages.sh create\|update` | Чтение/запись через бот-токен. Видит только расшаренные боту страницы. Notion-подобный REST API |
 | **Holst** — графические доски (аналог Miro) | `/ai-hub:holst-export` | — | Экспорт данных с визуальных досок (фреймы, стикеры, тексты) |
@@ -96,14 +96,13 @@ Claude Code CLI ищет slash-команды в `.claude/commands/`. Коман
 
 ## Team Config
 
-**При любом вопросе о Kaiten-досках, карточках, колонках, каналах Time или страницах Buildin — первым делом проверь наличие `team-config.json` в корне репозитория.** Если файл есть — используй ID досок, колонок и каналов оттуда. Не спрашивай пользователя о board_id/column_id, если они есть в конфиге.
+**При любом вопросе о Kaiten-досках, карточках, колонках или страницах Buildin — первым делом проверь наличие `team-config.json` в корне репозитория.** Если файл есть — используй ID досок, колонок и каналов оттуда. Не спрашивай пользователя о board_id/column_id, если они есть в конфиге.
 
 Шаблон для создания конфига — `team-config.example.json`. Структура:
 - `kaiten.boards.sprint` — спринтовая доска (id, колонки: sprint_backlog, in_progress, doing, on_hold, done)
 - `kaiten.boards.business_backlog` — бизнес-бэклог (id, колонки discovery/ready)
 - `kaiten.space_id` — пространство команды
 - `kaiten.property_id_affected_services` — ID кастомного свойства
-- `time.channels` — ключевые каналы команды
 
 Shell-скрипты (kaiten-export-board.sh и др.) читают конфиг автоматически через `jq`. Agent-команды (.md) проверяют наличие файла и используют значения.
 

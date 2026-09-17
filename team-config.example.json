@@ -33,12 +33,6 @@
       "techdebt": null
     }
   },
-  "time": {
-    "channels": {
-      "dev": "your-team-dev",
-      "general": "your-team-general"
-    }
-  },
   "buildin": {
     "bookmarks": {}
   }
