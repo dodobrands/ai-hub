@@ -41,8 +41,8 @@
     },
     {
       "name": "time",
-      "description": "Time (Mattermost) integration — read/write channels, messages, threads with dual auth (bot + personal)",
-      "version": "1.1.0",
+      "description": "DEPRECATED — переехал в плагин dodo-time (MCP). Оставлен заглушкой, чтобы старые установки подсказали, как мигрировать",
+      "version": "2.0.0",
       "author": {
         "name": "AI Hub Contributors"
       },

@@ -9,7 +9,6 @@ LLM context.
 
 Always go through the service-specific shell wrapper:
     bash integrations/buildin/scripts/buildin-login.sh cookie
-    bash integrations/time/scripts/time-login.sh cookie
 
 …which captures stdout into a shell-local variable, validates, and writes to
 .env without exposing anything to the agent beyond `ok <nickname>`.
@@ -25,8 +24,8 @@ Usage (for shell wrappers only):
     browser-cookie-extract.py <url> <cookie_name> [browser]
 
 Arguments:
-    url          e.g. https://buildin.ai or $TIME_BASE_URL
-    cookie_name  e.g. next_auth, MMAUTHTOKEN
+    url          e.g. https://buildin.ai
+    cookie_name  e.g. next_auth
     browser      one of: chrome, chromium, brave, edge, vivaldi, opera, arc,
                  firefox, auto (default: auto — try all)
 

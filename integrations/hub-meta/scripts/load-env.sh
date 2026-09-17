@@ -37,8 +37,6 @@ HUB_KNOWN_SECRETS=(
     KAITEN_TOKEN
     BUILDIN_UI_TOKEN
     BUILDIN_BOT_TOKEN
-    TIME_TOKEN
-    TIME_BOT_TOKEN
     GENIE_TOKEN
     KUSTO_TOKEN
     TESTOPS_TOKEN
@@ -65,8 +63,8 @@ hub_load_env() {
     # shipped inside a vendored subtree) are still picked up. This gives
     # team-overlay installs the expected behavior — team .env at the repo root
     # overrides any leftover values inside integrations/sagos95-ai-hub/.env,
-    # while still picking up subtree-only keys (e.g. KUSTO_CLUSTER,
-    # TIME_BASE_URL) when the overlay doesn't redefine them.
+    # while still picking up subtree-only keys (e.g. KUSTO_CLUSTER)
+    # when the overlay doesn't redefine them.
     local found=()
     local dir="$start"
     # The "." guard is a safety net in case start was not normalized to an

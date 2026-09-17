@@ -1,6 +1,6 @@
 # AI Hub (ИИ концентратор)
 
-Набор AI-инструментов для интеграции с разными полезными сервисами: Kaiten, Time (Mattermost), Buildin, Genie, Holst. Плюс автоматизация spike-исследований, product discovery, тестирования и диагностики.
+Набор AI-инструментов для интеграции с разными полезными сервисами: Kaiten, Buildin, Genie, Holst. Плюс автоматизация spike-исследований, product discovery, тестирования и диагностики.
 
 > **Новые скиллы публикуются в [dodo-ai-platform/marketplace-ai-tools](https://github.com/dodo-ai-platform/marketplace-ai-tools).**  
 > По всем вопросам обращайтесь к команде Маркетплейса, канал [ai-hub-public](https://dodobrands.time-messenger.ru/dodo-brands/channels/ai-hub-public).
@@ -32,12 +32,11 @@ claude /plugin marketplace add dodobrands/ai-hub
 # Установить все инструменты:
 claude /plugin install buildin@ai-hub code-review@ai-hub discovery@ai-hub \
   genie@ai-hub holst@ai-hub hub-meta@ai-hub kaiten@ai-hub \
-  reverse-product-analysis@ai-hub spike@ai-hub test-factory@ai-hub testops@ai-hub time@ai-hub
+  reverse-product-analysis@ai-hub spike@ai-hub test-factory@ai-hub testops@ai-hub
 
 # Установить конкретный плагин:
 claude /plugin install spike@ai-hub
 claude /plugin install kaiten@ai-hub
-claude /plugin install time@ai-hub
 claude /plugin install testops@ai-hub
 ```
 
@@ -50,14 +49,16 @@ copilot plugin marketplace add dodobrands/ai-hub
 # Установить все инструменты:
 copilot plugin install buildin@ai-hub code-review@ai-hub discovery@ai-hub \
   genie@ai-hub holst@ai-hub hub-meta@ai-hub kaiten@ai-hub \
-  reverse-product-analysis@ai-hub spike@ai-hub test-factory@ai-hub testops@ai-hub time@ai-hub
+  reverse-product-analysis@ai-hub spike@ai-hub test-factory@ai-hub testops@ai-hub
 
 # Установить конкретный плагин:
 copilot plugin install spike@ai-hub
 copilot plugin install testops@ai-hub
 ```
 
-Доступные плагины: `buildin`, `code-review`, `discovery`, `genie`, `holst`, `hub-meta`, `kaiten`, `reverse-product-analysis`, `spike`, `test-factory`, `testops`, `time`.
+Доступные плагины: `buildin`, `code-review`, `discovery`, `genie`, `holst`, `hub-meta`, `kaiten`, `reverse-product-analysis`, `spike`, `test-factory`, `testops`.
+
+> **Time переехал.** Коннектор к мессенджеру Time больше не входит в ai-hub — он живёт в отдельном плагине `dodo-time` на MCP: `claude plugin install dodo-time@dodo-ai-marketplace`. Плагин `time@ai-hub` остался заглушкой, которая подсказывает, как мигрировать, и будет удалён. Подробности — [integrations/time/README.md](integrations/time/README.md).
 
 ### Через git clone или zip + setup
 
@@ -87,10 +88,9 @@ bash integrations/hub-meta/scripts/setup.sh next
 
 | Переменная | Как получить |
 |------------|--------------|
-| `KAITEN_DOMAIN`, `TIME_BASE_URL`, `BUILDIN_SPACE_ID` | Общий конфиг команды — лежит на странице Buildin `https://buildin.ai/c7ec2023-9025-4c09-be09-e6f54cb07f7e` (если команда использует этот шаблон). Или спроси коллег. |
+| `KAITEN_DOMAIN`, `BUILDIN_SPACE_ID` | Общий конфиг команды — лежит на странице Buildin `https://buildin.ai/c7ec2023-9025-4c09-be09-e6f54cb07f7e` (если команда использует этот шаблон). Или спроси коллег. |
 | `KAITEN_TOKEN` | Kaiten → Настройки профиля → API/Интеграции → Создать токен |
 | `BUILDIN_UI_TOKEN` | `/ai-hub:buildin-login` — browser SSO |
-| `TIME_TOKEN` | `/ai-hub:time-login` — browser SSO |
 | `GENIE_TOKEN` | Опционально, получить у админа данных |
 | `TESTOPS_URL`, `TESTOPS_TOKEN` | Allure TestOps → Settings → API Tokens → Generate Token |
 
@@ -111,7 +111,6 @@ bash integrations/hub-meta/scripts/setup.sh next
 ├── integrations/                 # Интеграции: скиллы, плагины и т.д.
 │   ├── kaiten/                   #   Интеграция с Kaiten (чтение, запись, поиск по доскам, карточкам, и т.д.)
 │   ├── buildin/                  #   Buildin (чтение, запись, поиск по страницам)
-│   ├── time/                     #   Time (чтение, запись, поиск по сообщениям, каналам, тредам)
 │   ├── genie/                    #   Databricks Genie (аналитика)
 │   ├── holst/                    #   Holst.so — (в основном чтение досок)
 │   ├── spike/                    #   Скилл для технического исследования задачи
@@ -150,7 +149,7 @@ integrations/
 
 - **[Kaiten](integrations/kaiten/)** — универсальный клиент для Kaiten API. Чтение и запись карточек, комментариев, чек-листов, свойств, структуры досок и колонок. Фундамент для большинства других интеграций.
 
-- **[Time](integrations/time/)** `/ai-hub:time-chat` — полный доступ к мессенджеру Time (Mattermost). Чтение каналов и тредов, отправка сообщений. Логин через browser-based SSO — токен не попадает в контекст LLM.
+- **[Time](integrations/time/)** — ⚠️ DEPRECATED, переехал в плагин `dodo-time` (MCP, OAuth). В ai-hub остались только заглушки команд с инструкцией по миграции.
 
 - **[Buildin](integrations/buildin/)** `/ai-hub:buildin-read` `/ai-hub:buildin-publish` — чтение и запись во внутреннюю wiki Buildin.ai. Рекурсивное раскрытие вложенных блоков, навигация по дереву, поиск по названию.
 
@@ -273,7 +272,7 @@ claude /ai-hub:create-command my-integration my-command
 
 Обычный PR из ветки внутри репозитория может создать только тот, у кого есть write-доступ (коллаборатор). Если тебя нет в коллабораторах — это норма для публичного репозитория — форкни `dodobrands/ai-hub` и пришли PR из своего форка. Это стандартная опенсорс-модель fork-and-pull: чужой код изолирован и не выполняется в нашем CI, пока мейнтейнер его не одобрит.
 
-Из-за этой же изоляции CI на fork-PR не стартует сам — под проверками появляется кнопка **«Approve and run workflows»**, её нажимает мейнтейнер. Плюс проверка `path-resolution` фильтруется по путям (`buildin`/`kaiten`/`time`): если PR их не задевает, гейт просто не запускается — так и задумано.
+Из-за этой же изоляции CI на fork-PR не стартует сам — под проверками появляется кнопка **«Approve and run workflows»**, её нажимает мейнтейнер. Плюс проверка `path-resolution` фильтруется по путям (`buildin`/`kaiten`): если PR их не задевает, гейт просто не запускается — так и задумано.
 
 ## Лицензия
 
