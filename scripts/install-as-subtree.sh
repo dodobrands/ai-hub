@@ -57,52 +57,15 @@ echo ">>> git subtree add --prefix=$PREFIX $REMOTE_NAME $BRANCH --squash"
 git subtree add --prefix="$PREFIX" "$REMOTE_NAME" "$BRANCH" --squash
 
 # --- Link all commands from the subtree into .claude/commands/<namespace>/ ---
-link_commands() {
-  local prefix="$1"
-  local namespace="$2"
-  local target_dir=".claude/commands/$namespace"
-  # target_dir is .claude/commands/<ns>/ → 3 levels up to repo root
-  local up="../../../"
-
-  mkdir -p "$target_dir"
-
-  local created=0 skipped=0 conflicted=0
-  shopt -s nullglob
-  for cmd_file in "$prefix"/integrations/*/commands/*.md; do
-    local base
-    base=$(basename "$cmd_file")
-    local link="$target_dir/$base"
-
-    if [[ -L "$link" ]]; then
-      # Already a symlink — check if it points where we expect; if yes, skip silently
-      local current_target
-      current_target=$(readlink "$link")
-      if [[ "$current_target" == "${up}${cmd_file}" ]]; then
-        ((skipped++))
-      else
-        echo "   ! $base already symlinked elsewhere (kept): $current_target"
-        ((conflicted++))
-      fi
-      continue
-    fi
-
-    if [[ -e "$link" ]]; then
-      echo "   ! $base exists as regular file — not overwriting"
-      ((conflicted++))
-      continue
-    fi
-
-    (cd "$target_dir" && ln -s "${up}${cmd_file}" "$base")
-    echo "   + $base"
-    ((created++))
-  done
-  shopt -u nullglob
-
-  echo ">>> Symlinks in $target_dir/: $created created, $skipped already correct, $conflicted left in place"
-}
+# Библиотека берётся из только что добавленного сабтри, а не рядом со скриптом:
+# штатный способ запуска — `curl … | bash`, локального клона нет.
+LIB="$PREFIX/scripts/lib/link-commands.sh"
+[[ -f "$LIB" ]] || die "lib not found in the subtree: $LIB"
+# shellcheck source=lib/link-commands.sh
+. "$LIB"
 
 echo ">>> Linking slash-commands into .claude/commands/$NAMESPACE/ ..."
-link_commands "$PREFIX" "$NAMESPACE"
+lc_link_commands "$PREFIX" "$NAMESPACE"
 
 # --- Register the subtree as a plugin in .claude/settings.json ---
 register_plugin() {

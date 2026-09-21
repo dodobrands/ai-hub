@@ -35,48 +35,11 @@ echo ">>> git subtree pull --prefix=$PREFIX $REMOTE_NAME $BRANCH --squash"
 git subtree pull --prefix="$PREFIX" "$REMOTE_NAME" "$BRANCH" --squash
 
 # --- Add symlinks for any NEW commands that arrived in the pull ---
-link_commands() {
-  local prefix="$1"
-  local namespace="$2"
-  local target_dir=".claude/commands/$namespace"
-  local up="../../../"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib/link-commands.sh"
+[[ -f "$LIB" ]] || die "lib not found: $LIB"
+# shellcheck source=lib/link-commands.sh
+. "$LIB"
 
-  mkdir -p "$target_dir"
-
-  local created=0 skipped=0 conflicted=0
-  shopt -s nullglob
-  for cmd_file in "$prefix"/integrations/*/commands/*.md; do
-    local base
-    base=$(basename "$cmd_file")
-    local link="$target_dir/$base"
-
-    if [[ -L "$link" ]]; then
-      local current_target
-      current_target=$(readlink "$link")
-      if [[ "$current_target" == "${up}${cmd_file}" ]]; then
-        ((skipped++))
-      else
-        ((conflicted++))
-      fi
-      continue
-    fi
-
-    if [[ -e "$link" ]]; then
-      ((conflicted++))
-      continue
-    fi
-
-    (cd "$target_dir" && ln -s "${up}${cmd_file}" "$base")
-    echo "   + new symlink: $base"
-    ((created++))
-  done
-  shopt -u nullglob
-
-  if (( created > 0 )); then
-    echo ">>> Symlinks: $created added"
-  fi
-}
-
-link_commands "$PREFIX" "$NAMESPACE"
+lc_link_commands "$PREFIX" "$NAMESPACE"
 
 echo ">>> Done. Review the merge commit with: git log -1 --stat"
