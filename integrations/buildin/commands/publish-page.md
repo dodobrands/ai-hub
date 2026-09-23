@@ -75,9 +75,13 @@ bash "$BUILDIN_SCRIPTS/buildin-pages.sh" create "<parent_page_id>" "<title>"
 расширенные блоки (таблицы, сворачиваемые секции, вложенные списки, mermaid):
 
 ```bash
-python3 "$BUILDIN_SCRIPTS/md-to-blocks.py" "<path/to/doc.md>" > /tmp/blocks.json
+W=$(bash "$BUILDIN_SCRIPTS/buildin-pages.sh" page-width "<page_id>")
+python3 "$BUILDIN_SCRIPTS/md-to-blocks.py" "<path/to/doc.md>" --table-width="$W" > /tmp/blocks.json
 bash "$BUILDIN_SCRIPTS/buildin-pages.sh" append-blocks "<page_id>" "$(cat /tmp/blocks.json)"
 ```
+
+`page-width` определяет ширину колонки контента по флагам страницы
+(`pageFixedWidth`, `directoryMenu`) — под неё подгоняются колонки таблиц.
 
 Маппинг заголовков совпадает с тем, что выдаёт `read-page` (round-trip): `#`→level 1,
 `##`→level 2, `###`→level 3. То есть прочитанную через `read-page` страницу можно
@@ -88,7 +92,8 @@ bash "$BUILDIN_SCRIPTS/buildin-pages.sh" append-blocks "<page_id>" "$(cat /tmp/b
 - `-`/`*` (вложенность по отступу) → список (4); `1.` → нумерованный (5); `- [ ]` → чек-лист (3)
 - `> текст` (ведущий эмодзи → иконка) → callout (13)
 - `---` → divider (9); ` ```lang ` → код (25); ` ```mermaid ` → диаграмма с preview
-- `| таблица |` → нативная таблица (27 + строки 28)
+- `| таблица |` → нативная таблица (27 + строки 28); ширины колонок пропорциональны
+  контенту и в сумме дают ширину колонки контента (`page-width`, по умолчанию 828px)
 - inline: `**bold**`, `*italic*`, `` `code` ``, `[t](url)`
 
 #### Вариант B: ручная сборка блоков (JSON)

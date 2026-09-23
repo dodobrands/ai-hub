@@ -6,7 +6,7 @@
 полем "children" — их создаёт buildin-blocks.py с правильными parentId/subNodes.
 
 Usage:
-    md-to-blocks.py <markdown_file> [--shift-headings] > blocks.json
+    md-to-blocks.py <markdown_file> [--shift-headings] [--table-width=828] > blocks.json
     cat doc.md | md-to-blocks.py - [--shift-headings] > blocks.json
 
 Поддержка Markdown:
@@ -20,7 +20,9 @@ Usage:
 - > выноска                            → callout (13); ведущий эмодзи → иконка
 - ---                                  → divider (9)
 - ``` код ```                          → code (25); ```mermaid → preview-диаграмма
-- | таблица |                          → native table (27 + строки 28)
+- | таблица |                          → native table (27 + строки 28);
+                                          ширины колонок подгоняются под ширину
+                                          страницы (828px) пропорционально контенту
 - абзацы                               → paragraph (1)
 
 Inline:
@@ -28,11 +30,14 @@ Inline:
 
 Опции:
 - --shift-headings   сдвинуть уровни на 1 (## → level 1) — крупные секции
+- --table-width=N    ширина страницы для подгонки таблиц (default 828,
+                     env BUILDIN_TABLE_WIDTH)
 
 Не поддерживается: изображения (добавляй отдельно через
 `buildin-pages.sh append-image`), цвета текста (нет в синтаксисе Markdown), формулы.
 """
 import json
+import os
 import re
 import sys
 import uuid
@@ -174,6 +179,44 @@ def code_data(lang, body):
     return {"language": None, "format": fmt, "segments": seg}
 
 
+# Зависит от настроек страницы (оглавление, full width) — точное значение даёт buildin-pages.sh page-width.
+TABLE_PAGE_WIDTH = int(os.environ.get("BUILDIN_TABLE_WIDTH") or 828)
+TABLE_MIN_COL_WIDTH = 60
+TABLE_CHAR_WIDTH = 7.2
+TABLE_CELL_PADDING = 20
+TABLE_MEASURE_CAP = 60
+
+
+def fit_column_widths(natural):
+    """Пропорционально растянуть/ужать колонки под ширину страницы."""
+    widths = list(natural)
+    fixed = [False] * len(widths)
+    for _ in range(len(widths)):
+        free_budget = TABLE_PAGE_WIDTH - sum(w for w, f in zip(widths, fixed) if f)
+        free_sum = sum(w for w, f in zip(widths, fixed) if not f)
+        if free_sum <= 0:
+            break
+        k = free_budget / free_sum
+        clamped = False
+        for idx, f in enumerate(fixed):
+            if f:
+                continue
+            w = widths[idx] * k
+            if w < TABLE_MIN_COL_WIDTH:
+                widths[idx], fixed[idx], clamped = TABLE_MIN_COL_WIDTH, True, True
+            else:
+                widths[idx] = w
+        if not clamped:
+            break
+    out = [int(round(w)) for w in widths]
+    # Остаток округления отдаём самой широкой колонке — чтобы сумма совпала со страницей.
+    diff = TABLE_PAGE_WIDTH - sum(out)
+    widest = out.index(max(out))
+    if out[widest] + diff >= TABLE_MIN_COL_WIDTH:
+        out[widest] += diff
+    return out
+
+
 def parse_table(lines, start):
     """Markdown pipe-таблица → блок table (27) с children-строками (28)."""
     table_lines = []
@@ -193,16 +236,30 @@ def parse_table(lines, start):
     ncols = max(len(r) for r in rows)
     col_ids = [str(uuid.uuid4()) for _ in range(ncols)]
     children = []
+    plain = [[] for _ in range(ncols)]
     for r in rows:
         r = r + [""] * (ncols - len(r))
-        cp = {col_ids[ci]: parse_inline(cell) for ci, cell in enumerate(r)}
+        cp = {}
+        for ci, cell in enumerate(r):
+            segs = parse_inline(cell)
+            cp[col_ids[ci]] = segs
+            plain[ci].append(sum(len(s.get("text", "")) for s in segs))
         children.append({"type": 28, "data": {"collectionProperties": cp}})
+    natural = [
+        max(TABLE_CELL_PADDING + TABLE_CHAR_WIDTH * min(max(lens), TABLE_MEASURE_CAP),
+            TABLE_MIN_COL_WIDTH)
+        for lens in plain
+    ]
+    widths = fit_column_widths(natural)
     table = {
         "type": 27,
         "data": {"segments": [], "format": {
             "commentAlignment": "top",
             "tableBlockRowHeader": True,
             "tableBlockColumnOrder": col_ids,
+            "tableBlockColumnFormat": {
+                cid: {"width": w} for cid, w in zip(col_ids, widths)
+            },
         }},
         "children": children,
     }
@@ -355,10 +412,14 @@ def _clean(b):
 
 
 def main():
+    global TABLE_PAGE_WIDTH
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     shift = "--shift-headings" in sys.argv
+    for a in sys.argv[1:]:
+        if a.startswith("--table-width="):
+            TABLE_PAGE_WIDTH = int(a.split("=", 1)[1])
     if not args:
-        print("Usage: md-to-blocks.py <markdown_file|-> [--shift-headings]", file=sys.stderr)
+        print("Usage: md-to-blocks.py <markdown_file|-> [--shift-headings] [--table-width=N]", file=sys.stderr)
         sys.exit(1)
     src = sys.stdin.read() if args[0] == "-" else open(args[0], encoding="utf-8").read()
     blocks = group_collapses(parse_md(src, shift=shift))

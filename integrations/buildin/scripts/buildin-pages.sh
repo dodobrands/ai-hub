@@ -25,6 +25,7 @@
 #   append-image <page_id> <image_file> [caption]      — загрузить картинку в S3 Buildin и добавить image-блок
 #                                                        (JPEG: размеры из SOF, EXIF Orientation не учитывается)
 #   delete-block <block_id> <parent_id>                — удалить блок
+#   page-width <page_id>                   — ширина колонки контента (px) для подгонки таблиц
 
 set -e
 
@@ -750,12 +751,38 @@ print(json.dumps(ops))
         transaction "$SPACE_ID" "$OPS"
         ;;
 
+    page-width)
+        PAGE_ID=$(parse_id "$1")
+        [[ -z "$PAGE_ID" ]] && { echo "Usage: page-width <page_id|url>" >&2; exit 1; }
+        buildin GET "/api/docs/$PAGE_ID" | python3 -c "
+import json, sys
+
+# Ширина колонки контента fixed-width страницы: с оглавлением — замер в UI, без — константа из бандла.
+CALIBRATED = {True: 828, False: 708}
+page_id = sys.argv[1]
+blocks = json.load(sys.stdin).get('data', {}).get('blocks', {})
+page = blocks.get(page_id) or {}
+pd = page.get('data', {}) or {}
+fixed = pd.get('pageFixedWidth', True)
+toc = bool(pd.get('directoryMenu'))
+width = CALIBRATED[toc]
+
+if not fixed:
+    print('page-width: страница в full width — ширина зависит от окна читателя, '
+          'число ниже условно (переопредели --table-width)', file=sys.stderr)
+elif not toc:
+    print('page-width: fixed width без оглавления — значение не калибровано замером', file=sys.stderr)
+print(width)
+" "$PAGE_ID"
+        ;;
+
     help|*)
         echo "Buildin Pages — операции со страницами и блоками (UI API)"
         echo "Принимает page_id как UUID или URL buildin.ai"
         echo ""
         echo "Commands:"
         echo "  get <id|url>                             — получить страницу (JSON, все блоки)"
+        echo "  page-width <id|url>                      — ширина колонки контента (px)"
         echo "  title <id|url>                           — заголовок страницы"
         echo "  read <id|url>                            — прочитать как markdown"
         echo "  create <parent_id|url> <title>           — создать дочернюю страницу"
