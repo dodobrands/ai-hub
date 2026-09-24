@@ -27,5 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Сниппет резолва выполняется в шелле пользователя, а не в bash: на macOS
+      # это zsh, где несовпавший glob фатален. Ставим zsh явно, иначе тест
+      # молча пропустит эту ветку и гейт останется к ней слепым.
+      - name: Install zsh
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
       - name: Run path-resolution gate
         run: bash tests/path-resolution.sh
