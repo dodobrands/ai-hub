@@ -177,7 +177,21 @@ def append_blocks_batch(page_id, blocks, user_id, token):
     transaction(build_ops(page_id, blocks, user_id, now), token)
 
 
-def convert_markdown(md_file, skip_h1=True):
+# Замеры колонки контента в UI (828 с оглавлением, 708 без) минус запас, иначе правая граница таблицы сливается с краем.
+TABLE_EDGE_GAP = 5
+PAGE_WIDTH_TOC = 828 - TABLE_EDGE_GAP
+PAGE_WIDTH_PLAIN = 708 - TABLE_EDGE_GAP
+
+
+def content_width(all_blocks, page_id):
+    """Ширина колонки контента по настройкам страницы, None — full width."""
+    data = (all_blocks.get(page_id) or {}).get("data") or {}
+    if not data.get("pageFixedWidth", True):
+        return None
+    return PAGE_WIDTH_TOC if data.get("directoryMenu") else PAGE_WIDTH_PLAIN
+
+
+def convert_markdown(md_file, skip_h1=True, table_width=None):
     """Разбор markdown внешним md-to-blocks.py.
 
     Здесь жил второй, упрощённый конвертер: он не отдавал children у таблиц,
@@ -186,6 +200,8 @@ def convert_markdown(md_file, skip_h1=True):
     багов; внешний поддерживается и покрыт тестами.
     """
     cmd = [sys.executable, _helper("md-to-blocks.py"), md_file]
+    if table_width:
+        cmd.append(f"--table-width={table_width}")
     if skip_h1:
         # H1 — заголовок самой страницы; блоком на странице он лишний.
         # Раньше сюда передавался --shift-headings, но это другая операция:
@@ -279,9 +295,11 @@ def main():
         print("\nMode: append — существующие блоки не трогаем")
 
     print(f"\nStep 2: Parse markdown {md_file}...")
-    blocks = convert_markdown(md_file, skip_h1=skip_h1)
+    width = content_width(doc, page_id)
+    blocks = convert_markdown(md_file, skip_h1=skip_h1, table_width=width)
     rows = sum(len(b.get("children") or []) for b in blocks)
-    print(f"  Converted to {len(blocks)} blocks ({rows} nested), skip_h1={skip_h1}")
+    print(f"  Converted to {len(blocks)} blocks ({rows} nested), skip_h1={skip_h1}, "
+          f"table width={width or 'full'}")
 
     print(f"\nStep 3: Append {len(blocks)} blocks in batches of {BATCH_SIZE}...")
     for i in range(0, len(blocks), BATCH_SIZE):

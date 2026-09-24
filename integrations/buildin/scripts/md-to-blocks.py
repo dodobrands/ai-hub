@@ -227,7 +227,8 @@ def code_data(lang, body):
 # на 88 символах — дальше колонка всё равно переносит текст.
 COL_MIN_WIDTH = 120
 COL_MAX_WIDTH = 620
-TABLE_WIDTH_BUDGET = 1240   # ширина контента страницы при pageFixedWidth: false
+# Дефолт — full width; для fixed-width страниц ширину передаёт publish-md по их настройкам.
+TABLE_WIDTH_BUDGET = 1240
 
 
 def visible_len(cell):
@@ -471,7 +472,11 @@ def _clean(b):
 
 
 def main():
+    global TABLE_WIDTH_BUDGET
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    for a in sys.argv[1:]:
+        if a.startswith("--table-width="):
+            TABLE_WIDTH_BUDGET = int(a.split("=", 1)[1])
     shift = "--shift-headings" in sys.argv
     skip_h1 = "--skip-h1" in sys.argv
     if not args:
