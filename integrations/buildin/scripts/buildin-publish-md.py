@@ -177,9 +177,10 @@ def append_blocks_batch(page_id, blocks, user_id, token):
     transaction(build_ops(page_id, blocks, user_id, now), token)
 
 
-# Замеры колонки контента в UI: 828 с оглавлением, 708 без.
-PAGE_WIDTH_TOC = 828
-PAGE_WIDTH_PLAIN = 708
+# Замеры колонки контента в UI (828 с оглавлением, 708 без) минус запас, иначе правая граница таблицы сливается с краем.
+TABLE_EDGE_GAP = 5
+PAGE_WIDTH_TOC = 828 - TABLE_EDGE_GAP
+PAGE_WIDTH_PLAIN = 708 - TABLE_EDGE_GAP
 
 
 def content_width(all_blocks, page_id):
