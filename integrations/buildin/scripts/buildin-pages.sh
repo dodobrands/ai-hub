@@ -16,6 +16,9 @@
 #   get-blocks <page_id>                   — получить блоки страницы (JSON)
 #   comments <page_id|url[#block_id]> [block_id] — комментарии страницы или конкретного блока
 #                                                  (URL с якорем #block-uuid фильтрует по блоку)
+#   comment <page_id|url[#block_id]> [block_id] <anchor> <text> [--dry-run] [--rollback-out=<path>]
+#                                                — создать комментарий к фразе <anchor> внутри блока
+#                                                  <anchor>/<text>: строка, «@путь» — файл, «-» — stdin
 #   publish-md <page_id> <file.md> [--replace]          — опубликовать markdown-файл
 #                                                        (по умолчанию дописывает в конец;
 #                                                         --replace заменяет содержимое)
@@ -44,6 +47,20 @@ parse_id() {
     local uuid
     uuid=$(echo "$input" | grep -oE "$uuid_re" | tail -1 || true)
     echo "${uuid:-$input}"
+}
+
+# Значение текстового аргумента: «@путь» — содержимое файла, «-» — stdin,
+# иначе строка как есть. Длинный текст комментария в bash-строке — ад
+# экранирования, поэтому у него есть файловая форма.
+read_arg_text() {
+    local value="$1"
+    case "$value" in
+        -)  cat ;;
+        @*) local file="${value#@}"
+            [[ -f "$file" ]] || { echo "Error: файл не найден: $file" >&2; exit 1; }
+            cat "$file" ;;
+        *)  printf '%s' "$value" ;;
+    esac
 }
 
 # Получить spaceId для страницы
@@ -390,6 +407,77 @@ if not found:
     where = f'блока {block_id}' if block_id else f'страницы {page_id}'
     print(f'Комментариев у {where} нет.')
 " "$DOC_FILE" "$MEMBERS_FILE" "$PAGE_ID" "$BLOCK_ID"
+        ;;
+
+    comment)
+        USAGE='Usage: comment <page_id|url[#block_id]> [block_id] <anchor> <text> [--dry-run] [--rollback-out=<path>]
+  <anchor>, <text>: строка, «@путь» — содержимое файла, «-» — stdin'
+        INPUT="$1"
+        [[ -z "$INPUT" ]] && { echo "$USAGE" >&2; exit 1; }
+        shift
+
+        DRY_RUN=""
+        ROLLBACK_OUT=""
+        ARGS=()
+        for arg in "$@"; do
+            case "$arg" in
+                --dry-run) DRY_RUN=1 ;;
+                --rollback-out=*) ROLLBACK_OUT="${arg#*=}" ;;
+                *) ARGS+=("$arg") ;;
+            esac
+        done
+
+        # Разбор идентификаторов — как у `comments`: страница это последний UUID
+        # до «#», блок берётся из якоря после «#» либо из первого позиционного
+        # аргумента. Аргумент считается блоком только если он целиком UUID —
+        # якорь такой формы был бы патологией, а обычная фраза ею не притворится.
+        UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+        BASE="${INPUT%%#*}"
+        PAGE_ID=$(echo "$BASE" | grep -oE "$UUID_RE" | tail -1 || true)
+        [[ -z "$PAGE_ID" ]] && { echo "Error: no UUID found in '$INPUT'" >&2; exit 1; }
+
+        BLOCK_ID=""
+        if [[ "${ARGS[0]:-}" =~ ^$UUID_RE$ ]]; then
+            BLOCK_ID="${ARGS[0]}"
+            ARGS=("${ARGS[@]:1}")
+        elif [[ "$INPUT" == *"#"* ]]; then
+            BLOCK_ID=$(echo "${INPUT#*#}" | grep -oE "$UUID_RE" | head -1 || true)
+        fi
+
+        RAW_ANCHOR="${ARGS[0]:-}"
+        RAW_TEXT="${ARGS[1]:-}"
+        [[ -z "$BLOCK_ID" || -z "$RAW_ANCHOR" || -z "$RAW_TEXT" ]] && { echo "$USAGE" >&2; exit 1; }
+        [[ "$RAW_ANCHOR" == "-" && "$RAW_TEXT" == "-" ]] && { echo "Error: stdin можно отдать только одному аргументу" >&2; exit 1; }
+
+        ANCHOR=$(read_arg_text "$RAW_ANCHOR")
+        TEXT=$(read_arg_text "$RAW_TEXT")
+
+        DOC_FILE=$(mktemp)
+        trap 'rm -f "$DOC_FILE"' EXIT
+        [[ -n "$ROLLBACK_OUT" ]] || ROLLBACK_OUT="${TMPDIR:-/tmp}/buildin-rollback-$BLOCK_ID.json"
+
+        buildin GET "/api/docs/$PAGE_ID" > "$DOC_FILE"
+        NOW=$(python3 -c "import time; print(int(time.time()*1000))")
+        USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+
+        OPS=$(python3 "$SCRIPT_DIR/buildin-comment.py" \
+            "$DOC_FILE" "$BLOCK_ID" "$ANCHOR" "$TEXT" "$NOW" "$USER_ID" \
+            --rollback-out "$ROLLBACK_OUT")
+        echo "Откат: $ROLLBACK_OUT" >&2
+
+        if [[ -n "$DRY_RUN" ]]; then
+            echo "$OPS" | python3 -m json.tool
+            exit 0
+        fi
+
+        # spaceId берём у самого блока — тот же, что уходит в args операций
+        SPACE_ID=$(python3 -c "
+import json, sys
+blocks = (json.load(open(sys.argv[1])).get('data') or {}).get('blocks') or {}
+print((blocks.get(sys.argv[2]) or {}).get('spaceId', ''))
+" "$DOC_FILE" "$BLOCK_ID")
+
+        transaction "$SPACE_ID" "$OPS"
         ;;
 
     read)
@@ -792,6 +880,9 @@ print(json.dumps(ops))
         echo "  archive <id|url>                         — архивировать (status: -1)"
         echo "  get-blocks <id|url>                      — блоки страницы (JSON; id блока в поле uuid)"
         echo "  comments <id|url[#block_id]> [block_id]  — комментарии страницы или блока (якорь #block-uuid фильтрует)"
+        echo "  comment <id|url[#block_id]> [block_id] <anchor> <text> [--dry-run] [--rollback-out=<path>]"
+        echo "                                           — комментарий к фразе <anchor> внутри блока"
+        echo "                                             <anchor>/<text>: строка, @путь — файл, - — stdin"
         echo "  publish-md <id|url> <file.md> [--replace] — опубликовать markdown (по умолчанию в конец)"
         echo "  append-blocks <id|url> <json_blocks>     — добавить блоки в конец страницы"
         echo "  insert-blocks-after <id|url> <after_block_id> <json_blocks>   — вставить блоки после блока"

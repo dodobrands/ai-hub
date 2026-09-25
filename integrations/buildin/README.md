@@ -10,14 +10,16 @@ integrations/buildin/
 │   └── plugin.json           # Манифест плагина
 ├── scripts/
 │   ├── buildin.sh            # Level 1: HTTP-клиент (curl + Bearer JWT, UI API)
-│   ├── buildin-pages.sh      # Level 2: CRUD + read (markdown) + delete-block
+│   ├── buildin-pages.sh      # Level 2: CRUD + read (markdown) + комментарии + delete-block
 │   ├── buildin-blocks.py     # Построитель транзакций для дерева блоков (вложенность)
+│   ├── buildin-comment.py    # Построитель транзакции комментария к фразе внутри блока
 │   ├── md-to-blocks.py       # Конвертер Markdown → блоки (таблицы, toggle, mermaid)
 │   ├── buildin-publish-md.py # Движок publish-md: батчи, ретраи, режим --replace
 │   ├── buildin-verify-md.py  # Сверка опубликованной страницы с исходным markdown
 │   ├── buildin-nav.sh        # Level 2: Навигация и поиск по дереву
 │   ├── buildin-shadow.sh     # Level 2: Shadow-индекс (локальный кеш)
 │   └── buildin-login.sh      # Проверка и сохранение JWT-токена
+├── tests/                     # bats-юниты: md-to-blocks, publish-md, verify-md, append-image, comment
 ├── shadow-index.json          # Локальный кеш структуры и саммари страниц
 ├── commands/
 │   ├── read-page.md          # Скилл: чтение страницы (URL/UUID/поиск)
@@ -110,6 +112,70 @@ JWT-токен живёт ~30 дней.
 # Архивировать
 ./integrations/buildin/scripts/buildin-pages.sh archive <id|url>
 ```
+
+### Комментарии
+
+Комментарий в Buildin — это тред (`discussion`), привязанный к блоку, плюс сообщения
+(`comment`) внутри треда. Тред всегда выделяет фразу внутри блока, поэтому у команды
+создания есть обязательный аргумент-якорь.
+
+```bash
+DIR=integrations/buildin/scripts
+
+# Прочитать все комментарии страницы
+bash $DIR/buildin-pages.sh comments <id|url>
+
+# Только комментарии одного блока — вторым аргументом или якорем в URL
+bash $DIR/buildin-pages.sh comments <id|url> <block_uuid>
+bash $DIR/buildin-pages.sh comments '<url>#<block_uuid>'
+
+# Создать комментарий к фразе внутри блока
+bash $DIR/buildin-pages.sh comment <id|url> <block_uuid> 'фраза-якорь' 'текст комментария'
+```
+
+`comment` принимает идентификаторы в тех же формах, что и `comments`: блок задаётся
+вторым аргументом либо якорем `#<block_uuid>` в URL. `block_uuid` — поле `uuid` из
+вывода `get-blocks`.
+
+Якорь и текст можно взять из файла (`@путь`) или из stdin (`-`) — длинный текст в
+bash-строке неудобно экранировать:
+
+```bash
+bash $DIR/buildin-pages.sh comment <id|url> <block_uuid> 'фраза-якорь' @comment.md
+cat comment.md | bash $DIR/buildin-pages.sh comment <id|url> <block_uuid> 'фраза-якорь' -
+```
+
+**Якорь обязан целиком лежать внутри одного сегмента.** Сегмент — отрезок текста с
+единым форматированием, поэтому фраза, задевающая границу жирного, кода или ссылки,
+выделена быть не может. Такой якорь команда отвергает с разбором сегментов блока, а
+не привязывает тред молча не туда:
+
+```
+Error: Якорь есть в тексте блока, но разорван границей сегментов. Якорь должен
+целиком лежать внутри одного сегмента.
+Текст блока: «лимит 100 запросов/мин»
+Сегменты:
+  [0] «лимит »
+  [1] «100 запросов» [code]
+  [2] «/мин»
+Возьмите фразу короче — целиком внутри одного форматирования.
+```
+
+`--dry-run` печатает операции транзакции, ничего не отправляя. Перед отправкой команда
+сохраняет payload отката — готовое тело запроса, возвращающее блоку прежние `data` и
+`discussions`. Файл кладётся в `$TMPDIR` (переопределяется опцией
+`--rollback-out=<path>`), его путь печатается в stderr. Откат — одной командой:
+
+```bash
+bash $DIR/buildin.sh POST /api/records/transactions "$(cat <путь из stderr>)"
+```
+
+Под капотом это три операции в одной транзакции: `discussion` (тред), `comment`
+(сообщение) и `update` блока, который выносит якорь в отдельный сегмент с
+`discussions: [<тред>]`. Без третьей операции тред создаётся, но остаётся
+неприкреплённым — на странице его не видно. Перенарезка сегментов обязана быть
+побайтово нейтральной для текста блока: это проверяется до отправки, и при
+расхождении команда отказывается работать.
 
 ### Расширенные блоки из Markdown
 
