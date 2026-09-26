@@ -16,9 +16,13 @@
 #   get-blocks <page_id>                   — получить блоки страницы (JSON)
 #   comments <page_id|url[#block_id]> [block_id] — комментарии страницы или конкретного блока
 #                                                  (URL с якорем #block-uuid фильтрует по блоку)
-#   comment <page_id|url[#block_id]> [block_id] <anchor> <text> [--dry-run] [--rollback-out=<path>]
+#   comment <page_id|url[#block_id]> [block_id] <anchor> <text>
+#           [--dry-run] [--occurrence=N] [--rollback-out=<path>]
 #                                                — создать комментарий к фразе <anchor> внутри блока
 #                                                  <anchor>/<text>: строка, «@путь» — файл, «-» — stdin
+#                                                  («@@текст» — литеральный «@текст», «--» — литеральный «-»)
+#                                                  якорь должен быть однозначен: несколько вхождений —
+#                                                  отказ, нужное выбирается через --occurrence=N
 #   publish-md <page_id> <file.md> [--replace]          — опубликовать markdown-файл
 #                                                        (по умолчанию дописывает в конец;
 #                                                         --replace заменяет содержимое)
@@ -52,15 +56,44 @@ parse_id() {
 # Значение текстового аргумента: «@путь» — содержимое файла, «-» — stdin,
 # иначе строка как есть. Длинный текст комментария в bash-строке — ад
 # экранирования, поэтому у него есть файловая форма.
+#
+# Сигилы экранируются удвоением: «@@текст» — литеральный «@текст», «--» —
+# литеральный «-». Без этого комментарий, начинающийся с упоминания, передать
+# было бы нечем: он молча уезжал бы в ветку «файл».
 read_arg_text() {
     local value="$1"
     case "$value" in
-        -)  cat ;;
-        @*) local file="${value#@}"
-            [[ -f "$file" ]] || { echo "Error: файл не найден: $file" >&2; exit 1; }
-            cat "$file" ;;
-        *)  printf '%s' "$value" ;;
+        -)   cat ;;
+        --)  printf '%s' '-' ;;
+        @@*) printf '%s' "${value#@}" ;;
+        @*)  local file="${value#@}"
+             [[ -f "$file" ]] || {
+                 echo "Error: значение начинается с «@», поэтому разобрано как путь к файлу: $file" >&2
+                 echo "       файл не найден. Нужен литеральный текст с «@» — удвойте сигил: @@${file}" >&2
+                 exit 1
+             }
+             cat "$file" ;;
+        *)   printf '%s' "$value" ;;
     esac
+}
+
+# Разобрать идентификаторы страницы и блока из общей формы «<uuid|url[#block]>
+# [block_id]». Выставляет PAGE_ID и BLOCK_ID. Один разбор на `comments` и
+# `comment`: две копии пришлось бы держать в синхроне руками.
+parse_page_and_block_id() {
+    local input="$1"
+    local maybe_block="${2:-}"
+    local uuid_re='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+    # Полный URL — buildin.ai/<space>/<page>: страница это последний UUID до «#»
+    # (как в parse_id), блок — из якоря после «#».
+    PAGE_ID=$(echo "${input%%#*}" | grep -oE "$uuid_re" | tail -1 || true)
+    [[ -z "$PAGE_ID" ]] && { echo "Error: no UUID found in '$input'" >&2; exit 1; }
+
+    BLOCK_ID="$maybe_block"
+    if [[ -z "$BLOCK_ID" && "$input" == *"#"* ]]; then
+        BLOCK_ID=$(echo "${input#*#}" | grep -oE "$uuid_re" | head -1 || true)
+    fi
 }
 
 # Получить spaceId для страницы
@@ -78,17 +111,13 @@ gen_uuid() {
     python3 -c "import uuid; print(str(uuid.uuid4()))"
 }
 
-# Выполнить транзакцию
-transaction() {
+# Тело запроса к /api/records/transactions. Отдельно от отправки: тот же конверт
+# нужен файлу отката, а две его копии разошлись бы молча и вскрылись бы ровно
+# в тот момент, когда откат понадобится.
+tx_body() {
     local SPACE_ID="$1"
     local OPERATIONS="$2"
-    local REQ_ID
-    REQ_ID=$(gen_uuid)
-    local TX_ID
-    TX_ID=$(gen_uuid)
-
-    local body
-    body=$(python3 -c "
+    python3 -c "
 import json, sys
 ops = json.loads(sys.argv[1])
 print(json.dumps({
@@ -98,10 +127,15 @@ print(json.dumps({
         'spaceId': sys.argv[4],
         'operations': ops
     }]
-}))
-" "$OPERATIONS" "$REQ_ID" "$TX_ID" "$SPACE_ID")
+}, ensure_ascii=False))
+" "$OPERATIONS" "$(gen_uuid)" "$(gen_uuid)" "$SPACE_ID"
+}
 
-    buildin POST "/api/records/transactions" "$body"
+# Выполнить транзакцию
+transaction() {
+    local SPACE_ID="$1"
+    local OPERATIONS="$2"
+    buildin POST "/api/records/transactions" "$(tx_body "$SPACE_ID" "$OPERATIONS")"
 }
 
 COMMAND="${1:-help}"
@@ -319,16 +353,7 @@ print(json.dumps(result, indent=2, ensure_ascii=False))
     comments)
         INPUT="$1"
         [[ -z "$INPUT" ]] && { echo "Usage: comments <page_id|url[#block_id]> [block_id]" >&2; exit 1; }
-        # Полный URL — buildin.ai/<space>/<page>: страница — последний UUID до «#»
-        # (как в parse_id), блок — из якоря после «#».
-        UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-        BASE="${INPUT%%#*}"
-        PAGE_ID=$(echo "$BASE" | grep -oE "$UUID_RE" | tail -1 || true)
-        [[ -z "$PAGE_ID" ]] && { echo "Error: no UUID found in '$INPUT'" >&2; exit 1; }
-        BLOCK_ID="${2:-}"
-        if [[ -z "$BLOCK_ID" && "$INPUT" == *"#"* ]]; then
-            BLOCK_ID=$(echo "${INPUT#*#}" | grep -oE "$UUID_RE" | head -1 || true)
-        fi
+        parse_page_and_block_id "$INPUT" "${2:-}"
 
         DOC_FILE=$(mktemp)
         MEMBERS_FILE=$(mktemp)
@@ -410,63 +435,72 @@ if not found:
         ;;
 
     comment)
-        USAGE='Usage: comment <page_id|url[#block_id]> [block_id] <anchor> <text> [--dry-run] [--rollback-out=<path>]
-  <anchor>, <text>: строка, «@путь» — содержимое файла, «-» — stdin'
+        USAGE='Usage: comment <page_id|url[#block_id]> [block_id] <anchor> <text> [--dry-run] [--occurrence=N] [--rollback-out=<path>]
+  <anchor>, <text>: строка, «@путь» — содержимое файла, «-» — stdin
+                    («@@текст» — литеральный «@текст», «--» — литеральный «-»)'
         INPUT="$1"
         [[ -z "$INPUT" ]] && { echo "$USAGE" >&2; exit 1; }
         shift
 
+        # Неизвестные «--»-токены отвергаем, а не сваливаем в позиционные: иначе
+        # опечатка «--dryrun» молча делает боевую запись вместо превью.
         DRY_RUN=""
         ROLLBACK_OUT=""
+        OCCURRENCE=""
         ARGS=()
-        for arg in "$@"; do
-            case "$arg" in
-                --dry-run) DRY_RUN=1 ;;
-                --rollback-out=*) ROLLBACK_OUT="${arg#*=}" ;;
-                *) ARGS+=("$arg") ;;
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --dry-run)         DRY_RUN=1 ;;
+                --occurrence=*)    OCCURRENCE="${1#*=}" ;;
+                --occurrence)      shift; OCCURRENCE="${1:-}" ;;
+                --rollback-out=*)  ROLLBACK_OUT="${1#*=}" ;;
+                --rollback-out)    shift; ROLLBACK_OUT="${1:-}" ;;
+                --)                shift; while [[ $# -gt 0 ]]; do ARGS+=("$1"); shift; done; break ;;
+                --*)               echo "Error: неизвестный флаг: $1" >&2; echo "$USAGE" >&2; exit 1 ;;
+                *)                 ARGS+=("$1") ;;
             esac
+            shift || true
         done
 
-        # Разбор идентификаторов — как у `comments`: страница это последний UUID
-        # до «#», блок берётся из якоря после «#» либо из первого позиционного
-        # аргумента. Аргумент считается блоком только если он целиком UUID —
-        # якорь такой формы был бы патологией, а обычная фраза ею не притворится.
+        parse_page_and_block_id "$INPUT"
+        # Первый позиционный считаем блоком, только если он целиком UUID: якорь
+        # такой формы был бы патологией, а обычная фраза ею не притворится.
         UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-        BASE="${INPUT%%#*}"
-        PAGE_ID=$(echo "$BASE" | grep -oE "$UUID_RE" | tail -1 || true)
-        [[ -z "$PAGE_ID" ]] && { echo "Error: no UUID found in '$INPUT'" >&2; exit 1; }
-
-        BLOCK_ID=""
         if [[ "${ARGS[0]:-}" =~ ^$UUID_RE$ ]]; then
             BLOCK_ID="${ARGS[0]}"
             ARGS=("${ARGS[@]:1}")
-        elif [[ "$INPUT" == *"#"* ]]; then
-            BLOCK_ID=$(echo "${INPUT#*#}" | grep -oE "$UUID_RE" | head -1 || true)
         fi
 
-        RAW_ANCHOR="${ARGS[0]:-}"
-        RAW_TEXT="${ARGS[1]:-}"
-        [[ -z "$BLOCK_ID" || -z "$RAW_ANCHOR" || -z "$RAW_TEXT" ]] && { echo "$USAGE" >&2; exit 1; }
-        [[ "$RAW_ANCHOR" == "-" && "$RAW_TEXT" == "-" ]] && { echo "Error: stdin можно отдать только одному аргументу" >&2; exit 1; }
+        [[ -z "$BLOCK_ID" ]] && { echo "Error: не указан block_id (аргументом или якорем #block-uuid в URL)" >&2; echo "$USAGE" >&2; exit 1; }
+        [[ ${#ARGS[@]} -eq 2 ]] || { echo "Error: ожидались ровно <anchor> и <text>, получено: ${#ARGS[@]}" >&2; echo "$USAGE" >&2; exit 1; }
+        [[ -z "$OCCURRENCE" || "$OCCURRENCE" =~ ^[1-9][0-9]*$ ]] || { echo "Error: --occurrence ожидает целое число >= 1, получено: $OCCURRENCE" >&2; exit 1; }
+        [[ "${ARGS[0]}" == "-" && "${ARGS[1]}" == "-" ]] && { echo "Error: stdin можно отдать только одному аргументу" >&2; exit 1; }
 
-        ANCHOR=$(read_arg_text "$RAW_ANCHOR")
-        TEXT=$(read_arg_text "$RAW_TEXT")
+        ANCHOR=$(read_arg_text "${ARGS[0]}")
+        TEXT=$(read_arg_text "${ARGS[1]}")
+        # Проверяем РАЗВЁРНУТЫЕ значения: пустой файл и пустой stdin дают непустой
+        # сигил, и тред с пустым сообщением уходил бы в живой документ.
+        [[ -z "$ANCHOR" ]] && { echo "Error: якорь пустой" >&2; exit 1; }
+        [[ -z "$TEXT" ]] && { echo "Error: текст комментария пустой" >&2; exit 1; }
 
         DOC_FILE=$(mktemp)
-        trap 'rm -f "$DOC_FILE"' EXIT
-        [[ -n "$ROLLBACK_OUT" ]] || ROLLBACK_OUT="${TMPDIR:-/tmp}/buildin-rollback-$BLOCK_ID.json"
+        FRESH_FILE=""
+        trap 'rm -f "$DOC_FILE" ${FRESH_FILE:+"$FRESH_FILE"}' EXIT
 
         buildin GET "/api/docs/$PAGE_ID" > "$DOC_FILE"
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
         USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
 
-        OPS=$(python3 "$SCRIPT_DIR/buildin-comment.py" \
+        BUILT=$(python3 "$SCRIPT_DIR/buildin-comment.py" \
             "$DOC_FILE" "$BLOCK_ID" "$ANCHOR" "$TEXT" "$NOW" "$USER_ID" \
-            --rollback-out "$ROLLBACK_OUT")
-        echo "Откат: $ROLLBACK_OUT" >&2
+            ${OCCURRENCE:+--occurrence="$OCCURRENCE"})
 
         if [[ -n "$DRY_RUN" ]]; then
-            echo "$OPS" | python3 -m json.tool
+            # Превью не трогает ни сеть, ни диск: файл отката по дефолтному пути
+            # затёр бы откат предыдущего РЕАЛЬНОГО комментария.
+            echo "$BUILT" | python3 -c "
+import json, sys
+print(json.dumps(json.load(sys.stdin)['ops'], ensure_ascii=False, indent=2))"
             exit 0
         fi
 
@@ -477,7 +511,61 @@ blocks = (json.load(open(sys.argv[1])).get('data') or {}).get('blocks') or {}
 print((blocks.get(sys.argv[2]) or {}).get('spaceId', ''))
 " "$DOC_FILE" "$BLOCK_ID")
 
-        transaction "$SPACE_ID" "$OPS"
+        # Оптимистичная проверка. Операции узкие, поэтому чужие ключи data и
+        # чужие треды в списке переживают запись, а вот segments уходят целиком
+        # из снапшота: правка блока между GET и POST потеряла бы чужую подсветку.
+        FRESH_FILE=$(mktemp)
+        buildin GET "/api/docs/$PAGE_ID" > "$FRESH_FILE"
+        python3 -c "
+import json, sys
+def segs(path):
+    blocks = (json.load(open(path)).get('data') or {}).get('blocks') or {}
+    return ((blocks.get(sys.argv[3]) or {}).get('data') or {}).get('segments')
+if segs(sys.argv[1]) != segs(sys.argv[2]):
+    sys.exit('Error: блок изменился, пока готовился комментарий — запись отменена.\n'
+             '       Повторите команду: она возьмёт свежее состояние блока.')
+" "$DOC_FILE" "$FRESH_FILE" "$BLOCK_ID"
+
+        [[ -n "$ROLLBACK_OUT" ]] || ROLLBACK_OUT=$(mktemp "${TMPDIR:-/tmp}/buildin-rollback-XXXXXX")
+        tx_body "$SPACE_ID" "$(echo "$BUILT" | python3 -c "
+import json, sys
+print(json.dumps(json.load(sys.stdin)['rollback'], ensure_ascii=False))")" > "$ROLLBACK_OUT"
+        echo "Откат: $ROLLBACK_OUT" >&2
+
+        DISCUSSION=$(echo "$BUILT" | python3 -c "import json, sys; print(json.load(sys.stdin)['discussion'])")
+        transaction "$SPACE_ID" "$(echo "$BUILT" | python3 -c "
+import json, sys
+print(json.dumps(json.load(sys.stdin)['ops'], ensure_ascii=False))")"
+
+        # Проверка ПОСЛЕ записи. Проверка до неё сужает окно, но не закрывает:
+        # несколько процессов успевают сделать оба GET раньше первого POST, и
+        # тогда побеждает последний писавший segments. Молча терять подсветку
+        # нельзя, поэтому результат сверяется по факту.
+        buildin GET "/api/docs/$PAGE_ID" > "$FRESH_FILE"
+        python3 -c "
+import json, sys
+before_path, after_path, block_id, ours = sys.argv[1:5]
+
+def highlighted(path):
+    blocks = (json.load(open(path)).get('data') or {}).get('blocks') or {}
+    segments = (((blocks.get(block_id) or {}).get('data') or {}).get('segments')) or []
+    return {t for s in segments for t in (s.get('discussions') or [])}
+
+after = highlighted(after_path)
+if ours not in after:
+    sys.exit('Error: тред создан, но подсветка не закрепилась — блок перезаписали параллельно.\n'
+             '       Примените файл отката (путь выше) и повторите команду.')
+# База — снапшот, из которого строилась запись: наши сегменты его подсветку
+# сохраняют, поэтому пропажа означает чужую запись поверх нашей. Давно
+# осиротевшие треды в базе не подсвечены и ложной тревоги не дают.
+lost = sorted(highlighted(before_path) - after)
+if lost:
+    sys.stderr.write(
+        'ВНИМАНИЕ: параллельная запись лишила подсветки чужие треды: %s\n'
+        '          Они остались в списке блока, но на странице их не видно.\n' % ', '.join(lost))
+" "$DOC_FILE" "$FRESH_FILE" "$BLOCK_ID" "$DISCUSSION"
+
+        echo "discussion: $DISCUSSION" >&2
         ;;
 
     read)
@@ -880,9 +968,12 @@ print(json.dumps(ops))
         echo "  archive <id|url>                         — архивировать (status: -1)"
         echo "  get-blocks <id|url>                      — блоки страницы (JSON; id блока в поле uuid)"
         echo "  comments <id|url[#block_id]> [block_id]  — комментарии страницы или блока (якорь #block-uuid фильтрует)"
-        echo "  comment <id|url[#block_id]> [block_id] <anchor> <text> [--dry-run] [--rollback-out=<path>]"
+        echo "  comment <id|url[#block_id]> [block_id] <anchor> <text>"
+        echo "          [--dry-run] [--occurrence=N] [--rollback-out=<path>]"
         echo "                                           — комментарий к фразе <anchor> внутри блока"
         echo "                                             <anchor>/<text>: строка, @путь — файл, - — stdin"
+        echo "                                             (@@текст — литеральный @текст, -- — литеральный -)"
+        echo "                                             неоднозначный якорь — отказ, см. --occurrence=N"
         echo "  publish-md <id|url> <file.md> [--replace] — опубликовать markdown (по умолчанию в конец)"
         echo "  append-blocks <id|url> <json_blocks>     — добавить блоки в конец страницы"
         echo "  insert-blocks-after <id|url> <after_block_id> <json_blocks>   — вставить блоки после блока"
