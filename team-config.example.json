@@ -40,6 +40,7 @@
     }
   },
   "buildin": {
+    "root_page_id": "<page_id>",
     "bookmarks": {}
   }
 }

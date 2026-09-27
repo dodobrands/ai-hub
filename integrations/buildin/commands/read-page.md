@@ -38,7 +38,7 @@ Root Page = YOUR_ROOT_PAGE_ID
 
 Поддерживаемые форматы:
 - URL: `https://buildin.ai/<space_id>/<page_id>`
-- UUID: `2a904afe-42e9-4ebd-a94e-f6fe0cbacf58`
+- UUID: `<page_id>`
 - Поисковый запрос: любой текст без UUID — ищет через UI Search API
 
 ## Workflow

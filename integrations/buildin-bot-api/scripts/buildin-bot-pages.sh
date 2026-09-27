@@ -4,8 +4,8 @@
 # Usage: ./buildin-bot-pages.sh <command> [args...]
 #
 # Accepts page_id as UUID or URL:
-#   ./buildin-bot-pages.sh read 2a904afe-42e9-4ebd-a94e-f6fe0cbacf58
-#   ./buildin-bot-pages.sh read https://buildin.ai/241db73f.../2a904afe...
+#   ./buildin-bot-pages.sh read <page_id>
+#   ./buildin-bot-pages.sh read https://buildin.ai/<space_id>/<page_id>
 #
 # Commands:
 #   get <page_id>                          — get page metadata (JSON)

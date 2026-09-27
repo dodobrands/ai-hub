@@ -3,8 +3,8 @@
 # Usage: ./buildin-pages.sh <command> [args...]
 #
 # Принимает page_id как UUID или URL:
-#   ./buildin-pages.sh read 2a904afe-42e9-4ebd-a94e-f6fe0cbacf58
-#   ./buildin-pages.sh read https://buildin.ai/241db73f.../2a904afe...
+#   ./buildin-pages.sh read <page_id>
+#   ./buildin-pages.sh read https://buildin.ai/<space_id>/<page_id>
 #
 # Commands:
 #   get <page_id>                          — получить страницу (JSON, все блоки)
