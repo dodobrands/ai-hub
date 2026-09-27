@@ -164,6 +164,69 @@ else
     ok "append-blocks на здоровых ответах доходит до транзакции"
 fi
 
+# ---- песочница 3: сквозной путь — потребитель поверх настоящего buildin.sh ----
+# Здесь важен не код возврата (он и так верный), а вывод: потребители зовут
+# клиента в конвейере `buildin ... | python3`, и остановить питон оттуда нельзя.
+# На пустом stdin он валится JSONDecodeError и забивает трейсбеком то самое
+# внятное сообщение, ради которого всё делалось.
+cp "$SRC_DIR/buildin-pages.sh" "$SRC_DIR/buildin-nav.sh" "$SRC_DIR/buildin-blocks.py" \
+   "$API_ROOT/integrations/buildin/scripts/"
+
+PAGES="$API_ROOT/integrations/buildin/scripts/buildin-pages.sh"
+NAV="$API_ROOT/integrations/buildin/scripts/buildin-nav.sh"
+SOME_ID='11111111-2222-3333-4444-555555555555'
+
+# Прогнать команду потребителя поверх заданного ответа API.
+run_consumer() {
+    STUB_BODY="$1" STUB_HTTP="$2" PATH="$TMP/bin:$PATH" \
+        /bin/bash "$3" "$4" "$SOME_ID" > "$TMP/out.txt" 2> "$TMP/err.txt"
+}
+
+# При отказе API: причина видна, трейсбека нет, код возврата ненулевой.
+expect_clean_failure() {
+    local name="$1" body="$2" http="$3" script="$4" cmd="$5" needle="$6" rc
+    run_consumer "$body" "$http" "$script" "$cmd"; rc=$?
+    if [ "$rc" -eq 0 ]; then
+        fail "$name: ожидался ненулевой код возврата, получен 0"
+    elif grep -q 'Traceback' "$TMP/err.txt"; then
+        fail "$name: в stderr трейсбек питона — внятное сообщение в нём тонет"
+    elif ! grep -q "$needle" "$TMP/err.txt"; then
+        fail "$name: в stderr нет причины «$needle» (stderr: $(head -c 200 "$TMP/err.txt"))"
+    else
+        ok "$name"
+    fi
+}
+
+echo "--- потребитель при отказе API: сообщение без трейсбека ---"
+expect_clean_failure "title: code 3005 в теле"  '{"code":3005,"msg":"Document not found"}' 200 "$PAGES" title '3005'
+expect_clean_failure "title: HTTP 500"          '{"error":"boom"}'                         500 "$PAGES" title 'HTTP 500'
+expect_clean_failure "title: HTTP 401"          '{"code":401}'                             401 "$PAGES" title 'buildin-login'
+expect_clean_failure "get-blocks: code 3005"    '{"code":3005,"msg":"Document not found"}' 200 "$PAGES" get-blocks '3005'
+
+echo "--- stdout клиента при отказе — валидный JSON (иначе питон и падает) ---"
+for probe in '200:{"code":3005,"msg":"Document not found"}' '500:{"error":"boom"}' '401:{"code":401}'; do
+    http="${probe%%:*}"; body="${probe#*:}"
+    run_api "$body" "$http"
+    if python3 -c 'import json,sys; json.load(sys.stdin)' < "$TMP/out.txt" 2>/dev/null; then
+        ok "HTTP $http: stdout разбирается как JSON"
+    else
+        fail "HTTP $http: stdout не JSON → [$(head -c 120 "$TMP/out.txt")]"
+    fi
+done
+
+echo "--- buildin-nav.sh: обход дерева по-прежнему деградирует, а не падает ---"
+# get_title зовётся на каждый узел дерева: один сбойный узел должен помечаться
+# «(error)», а не ронять весь обход.
+STUB_BODY='{"code":3005,"msg":"Document not found"}' STUB_HTTP=200 PATH="$TMP/bin:$PATH" \
+    /bin/bash "$NAV" title "$SOME_ID" > "$TMP/out.txt" 2> "$TMP/err.txt"
+if grep -q 'Traceback' "$TMP/err.txt"; then
+    fail "nav title: в stderr трейсбек питона"
+elif ! grep -q '(error)' "$TMP/out.txt"; then
+    fail "nav title: сбойный узел должен помечаться «(error)», получено [$(head -c 80 "$TMP/out.txt")]"
+else
+    ok "nav title: сбойный узел помечен «(error)», обход не упал"
+fi
+
 echo
 if [ "$FAILS" -eq 0 ]; then
     echo "PASS: все проверки пройдены"

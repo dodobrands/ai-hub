@@ -29,7 +29,10 @@
 #                                                        (JPEG: размеры из SOF, EXIF Orientation не учитывается)
 #   delete-block <block_id> <parent_id>                — удалить блок
 
-set -e
+# pipefail обязателен вместе с JSON-отказом из buildin.sh: без него сбой клиента
+# в конвейере `buildin ... | python3` маскируется нулевым статусом питона,
+# который теперь честно разбирает тело ошибки и завершается успешно.
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

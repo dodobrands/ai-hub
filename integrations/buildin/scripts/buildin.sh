@@ -64,14 +64,39 @@ response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${BUILDIN_BASE_URL}${ENDP
 http_code=$(echo "$response" | tail -n1)
 body=$(echo "$response" | sed '$d')
 
+# Отказ клиента: тот же отказ дублируется в stdout валидным JSON.
+#
+# Потребители зовут нас в конвейере (`buildin ... | python3 -c "json.load(...)"`),
+# а producer в конвейере не может остановить consumer: питон запускается всегда.
+# С пустым stdin он валится JSONDecodeError и забивает трейсбеком то самое
+# внятное сообщение, которое мы только что написали в stderr. Разбираемый ввод
+# эту связку развязывает — питон отрабатывает тихо, а несогласие доезжает кодом
+# возврата, который на той стороне ловит `set -o pipefail`.
+#
+# Контракт получается ровный: stdout — всегда валидный JSON, причина — в stderr,
+# вердикт — в коде возврата.
+emit_error_json() {
+    local code="$1"
+    local msg="$2"
+    local payload
+    payload=$(python3 -c 'import json, sys; print(json.dumps({"code": int(sys.argv[1]), "msg": sys.argv[2]}))' \
+        "$code" "$msg" 2>/dev/null) || payload=""
+    # Без python3 (или если код оказался не числом) — минимальный литерал:
+    # подставлять в JSON неэкранированный msg нельзя, кавычка в нём порвала бы тело.
+    [[ -n "$payload" ]] || payload="{\"code\":0,\"msg\":\"buildin.sh request failed\"}"
+    echo "$payload"
+}
+
 if [[ "$http_code" == "401" ]]; then
     echo "Error: Token expired. Run /ai-hub:buildin-login to re-authenticate." >&2
+    emit_error_json 401 "Token expired"
     exit 1
 fi
 
 if [[ "$http_code" -ge 400 ]]; then
     echo "Error: HTTP $http_code" >&2
     echo "$body" >&2
+    emit_error_json "$http_code" "HTTP $http_code"
     exit 1
 fi
 
@@ -100,10 +125,13 @@ if isinstance(code, str) and code.strip().lstrip("-").isdigit():
     code = int(code)
 if not isinstance(code, int) or 200 <= code < 300:
     sys.exit(0)
-print("%s: %s" % (code, payload.get("msg") or payload.get("message") or "no message"))
+print("%s\t%s" % (code, payload.get("msg") or payload.get("message") or "no message"))
 ' 2>/dev/null)
     if [[ -n "$api_error" ]]; then
-        echo "Error: Buildin API code $api_error" >&2
+        api_code="${api_error%%$'\t'*}"
+        api_msg="${api_error#*$'\t'}"
+        echo "Error: Buildin API code $api_code: $api_msg" >&2
+        emit_error_json "$api_code" "$api_msg"
         exit 1
     fi
 fi

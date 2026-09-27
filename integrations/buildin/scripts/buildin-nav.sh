@@ -11,7 +11,10 @@
 #   children <page_id>                   — список прямых дочерних страниц (id + title)
 #   parent <page_id>                     — родительская страница
 
-set -e
+# pipefail — как и в buildin-pages.sh: buildin.sh при отказе отдаёт тело ошибки
+# валидным JSON, питон его спокойно разбирает и выходит нулём, поэтому без
+# pipefail сбой API превратился бы в «успешно, просто пусто».
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -32,7 +35,9 @@ parse_id() {
 # Получить заголовок страницы через /api/blocks/{id}
 get_title() {
     local page_id="$1"
-    buildin GET "/api/blocks/$page_id" 2>/dev/null | python3 -c "
+    local resp
+    resp=$(buildin GET "/api/blocks/$page_id" 2>/dev/null) || { echo "(error)"; return 0; }
+    printf '%s' "$resp" | python3 -c "
 import json, sys
 try:
     data = json.load(sys.stdin).get('data', {})
