@@ -37,7 +37,22 @@ cat > "$TMP/bin/curl" <<'STUB'
 #!/bin/sh
 # Стаб curl: тело и HTTP-код задаёт тест через STUB_BODY/STUB_HTTP.
 # buildin.sh читает ответ как «тело \n http_code» (curl -w "\n%{http_code}").
-printf '%s\n%s\n' "$STUB_BODY" "$STUB_HTTP"
+#
+# Если задан STUB_ROUTES — тело выбирается по URL (последний аргумент curl):
+# файл со строками «шаблон<TAB>http<TAB>тело», выигрывает первое совпадение.
+# Одного тела на все запросы не хватает там, где важен ЧАСТИЧНЫЙ сбой: один
+# сбойный узел среди здоровых. Обход дерева ломается именно на нём.
+url=""
+for a in "$@"; do url="$a"; done
+if [ -n "${STUB_ROUTES:-}" ] && [ -f "$STUB_ROUTES" ]; then
+    while IFS='	' read -r pat http body; do
+        [ -z "$pat" ] && continue
+        case "$url" in
+            *$pat*) printf '%s\n%s\n' "$body" "$http"; exit 0 ;;
+        esac
+    done < "$STUB_ROUTES"
+fi
+printf '%s\n%s\n' "${STUB_BODY:-}" "${STUB_HTTP:-200}"
 STUB
 chmod +x "$TMP/bin/curl"
 
@@ -75,8 +90,9 @@ expect_pass() {
 }
 
 echo "--- buildin.sh: статус из тела ответа ---"
-expect_fail "code 3005 при HTTP 200 — отказ"        '{"code":3005,"msg":"Document not found"}'      200 '3005'
-expect_fail "code 3005 — msg попадает в stderr"     '{"code":3005,"msg":"Document not found"}'      200 'Document not found'
+# Ищем точную строку целиком: по отдельным «3005»/«Document not found» проверка
+# прошла бы и при развалившемся разборе по табу.
+expect_fail "code 3005 при HTTP 200 — отказ"        '{"code":3005,"msg":"Document not found"}'      200 'Error: Buildin API code 3005: Document not found'
 expect_fail "code 500 при HTTP 200 — отказ"         '{"code":500,"msg":"Internal server error."}'   200 '500'
 expect_fail "code 422 при HTTP 200 — отказ"         '{"code":422,"msg":"\"doc\" must be a GUID"}'   200 '422'
 
@@ -214,17 +230,127 @@ for probe in '200:{"code":3005,"msg":"Document not found"}' '500:{"error":"boom"
     fi
 done
 
-echo "--- buildin-nav.sh: обход дерева по-прежнему деградирует, а не падает ---"
-# get_title зовётся на каждый узел дерева: один сбойный узел должен помечаться
-# «(error)», а не ронять весь обход.
-STUB_BODY='{"code":3005,"msg":"Document not found"}' STUB_HTTP=200 PATH="$TMP/bin:$PATH" \
-    /bin/bash "$NAV" title "$SOME_ID" > "$TMP/out.txt" 2> "$TMP/err.txt"
-if grep -q 'Traceback' "$TMP/err.txt"; then
-    fail "nav title: в stderr трейсбек питона"
+echo "--- buildin-nav.sh: обход дерева деградирует поузлово, а не обрывается ---"
+# Дерево ROOT -> [A, BAD, C], сбоит только BAD. Проверяем не «title на одном id»
+# (такой вызов обход оборвать физически не может), а настоящий `tree`: сбойный
+# узел обязан стать листом с пометкой, а соседи после него — напечататься.
+ROOT_ID='aaaaaaaa-0000-0000-0000-000000000001'
+KID_A='aaaaaaaa-0000-0000-0000-00000000000a'
+KID_BAD='aaaaaaaa-0000-0000-0000-0000000000bb'
+KID_C='aaaaaaaa-0000-0000-0000-00000000000c'
+
+ROUTES="$TMP/routes.tsv"
+FAIL_BODY='{"code":3005,"msg":"Document not found"}'
+: > "$ROUTES"
+# Порядок важен: маршруты BAD должны стоять до общих.
+printf '%s\t200\t%s\n' "/$KID_BAD" "$FAIL_BODY" >> "$ROUTES"
+printf '/api/docs/%s\t200\t{"code":200,"data":{"blocks":{"%s":{"subNodes":["%s","%s","%s"]},"%s":{"type":0,"title":"ветка-A"},"%s":{"type":0,"title":"ветка-BAD"},"%s":{"type":0,"title":"ветка-C"}}}}\n' \
+    "$ROOT_ID" "$ROOT_ID" "$KID_A" "$KID_BAD" "$KID_C" "$KID_A" "$KID_BAD" "$KID_C" >> "$ROUTES"
+printf '/api/blocks/\t200\t{"code":200,"data":{"title":"узел","spaceId":"s","parentId":"p"}}\n' >> "$ROUTES"
+printf '/api/docs/\t200\t{"code":200,"data":{"blocks":{}}}\n' >> "$ROUTES"
+
+STUB_ROUTES="$ROUTES" PATH="$TMP/bin:$PATH" \
+    /bin/bash "$NAV" tree "$ROOT_ID" 2 > "$TMP/out.txt" 2> "$TMP/err.txt"
+TREE_RC=$?
+if [ "$TREE_RC" -ne 0 ]; then
+    fail "nav tree: обход упал (rc=$TREE_RC) из-за одного сбойного узла; stdout: $(tr '\n' '|' < "$TMP/out.txt")"
+elif grep -q 'Traceback' "$TMP/err.txt"; then
+    fail "nav tree: в stderr трейсбек питона"
 elif ! grep -q '(error)' "$TMP/out.txt"; then
-    fail "nav title: сбойный узел должен помечаться «(error)», получено [$(head -c 80 "$TMP/out.txt")]"
+    fail "nav tree: сбойный узел должен помечаться «(error)» — $(tr '\n' '|' < "$TMP/out.txt")"
+elif ! grep -q "$KID_C" "$TMP/out.txt"; then
+    fail "nav tree: сосед после сбойного узла не напечатан — $(tr '\n' '|' < "$TMP/out.txt")"
+elif [ "$(grep -n "$KID_C" "$TMP/out.txt" | cut -d: -f1)" -le "$(grep -n "$KID_BAD" "$TMP/out.txt" | cut -d: -f1)" ]; then
+    fail "nav tree: сосед напечатан до сбойного узла, а не после — $(tr '\n' '|' < "$TMP/out.txt")"
 else
-    ok "nav title: сбойный узел помечен «(error)», обход не упал"
+    ok "nav tree: сбойный узел стал листом, соседи после него напечатаны"
+fi
+
+# Сбой САМОГО корня — другое дело: печатать нечего, это должен быть отказ.
+STUB_BODY="$FAIL_BODY" STUB_HTTP=200 PATH="$TMP/bin:$PATH" \
+    /bin/bash "$NAV" tree "$ROOT_ID" 2 > "$TMP/out.txt" 2> "$TMP/err.txt"
+if [ $? -eq 0 ]; then
+    fail "nav tree: сбой корня должен давать ненулевой код возврата"
+else
+    ok "nav tree: сбой корня — отказ"
+fi
+
+# parent не должен выдавать «Root page» за ответ, которого не получил.
+STUB_BODY="$FAIL_BODY" STUB_HTTP=200 PATH="$TMP/bin:$PATH" \
+    /bin/bash "$NAV" parent "$ROOT_ID" > "$TMP/out.txt" 2> "$TMP/err.txt"
+if [ $? -eq 0 ]; then
+    fail "nav parent: при отказе ожидался ненулевой код возврата"
+elif grep -q 'Root page' "$TMP/out.txt"; then
+    fail "nav parent: при отказе напечатан ложный «Root page» — $(head -c 80 "$TMP/out.txt")"
+else
+    ok "nav parent: при отказе не выдаёт ложный «Root page»"
+fi
+
+echo "--- сетевой сбой: причина видна, stdout остаётся разбираемым ---"
+# Самый частый класс отказа на практике — DNS/VPN/таймаут. curl падает
+# ненулевым кодом ещё до всех проверок тела, и без обработки потребитель снова
+# получает JSONDecodeError, причём причины нет вообще: -s глушит и сам curl.
+FAILING_CURL="$TMP/failcurl"
+mkdir -p "$FAILING_CURL"
+cat > "$FAILING_CURL/curl" <<'STUB'
+#!/bin/sh
+echo "curl: (6) Could not resolve host" >&2
+exit 6
+STUB
+chmod +x "$FAILING_CURL/curl"
+
+PATH="$FAILING_CURL:$PATH" /bin/bash "$API_ROOT/integrations/buildin/scripts/buildin.sh" \
+    GET /api/users/me > "$TMP/out.txt" 2> "$TMP/err.txt"
+rc=$?
+if [ "$rc" -eq 0 ]; then
+    fail "сетевой сбой: ожидался ненулевой код возврата"
+elif ! grep -qi 'curl\|failed\|request' "$TMP/err.txt"; then
+    fail "сетевой сбой: в stderr нет причины (stderr: $(head -c 200 "$TMP/err.txt"))"
+elif ! python3 -c 'import json,sys; json.load(sys.stdin)' < "$TMP/out.txt" 2>/dev/null; then
+    fail "сетевой сбой: stdout не разбирается как JSON → [$(head -c 120 "$TMP/out.txt")]"
+else
+    ok "сетевой сбой: причина в stderr, stdout — валидный JSON"
+fi
+
+echo "--- buildin.sh без python3: клиент остаётся рабочим ---"
+# Без python3 проверка `code` невозможна — тело обязано пройти насквозь, как
+# раньше, а ветки по HTTP-статусу продолжают работать. Раньше это было заявлено
+# в описании, но не исполнялось: python3 всегда лежал в PATH прогона.
+NOPY="$TMP/nopy"
+mkdir -p "$NOPY"
+cp "$TMP/bin/curl" "$NOPY/curl"
+for tool in dirname sed tail head ls sort grep cat; do
+    tool_path=$(command -v "$tool" 2>/dev/null) && ln -sf "$tool_path" "$NOPY/$tool"
+done
+
+run_api_nopy() {
+    STUB_BODY="$1" STUB_HTTP="$2" PATH="$NOPY" \
+        /bin/bash "$API_ROOT/integrations/buildin/scripts/buildin.sh" GET /api/users/me \
+        > "$TMP/out.txt" 2> "$TMP/err.txt"
+}
+
+# Проверяем свежим процессом: у текущего шелла путь к python3 уже в хеш-таблице,
+# и `command -v` вернул бы его вопреки подменённому PATH.
+if env PATH="$NOPY" /bin/bash -c 'command -v python3' > /dev/null 2>&1; then
+    fail "песочница без python3 собрана неверно: python3 всё ещё доступен"
+else
+    run_api_nopy "$FAIL_BODY" 200; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        fail "без python3: не-успешный code проверить нечем, ответ должен пройти (rc=$rc)"
+    elif ! grep -q '3005' "$TMP/out.txt"; then
+        fail "без python3: тело должно дойти до вызывающего как есть"
+    else
+        ok "без python3: тело проходит насквозь, клиент не падает"
+    fi
+
+    run_api_nopy '{"error":"boom"}' 500; rc=$?
+    if [ "$rc" -eq 0 ]; then
+        fail "без python3: HTTP 500 всё равно обязан быть отказом"
+    elif ! grep -q 'buildin.sh request failed' "$TMP/out.txt"; then
+        fail "без python3: в stdout ожидался литерал-фолбэк, получено [$(head -c 120 "$TMP/out.txt")]"
+    else
+        ok "без python3: HTTP 500 — отказ, в stdout литерал-фолбэк"
+    fi
 fi
 
 echo

@@ -8,8 +8,8 @@
 #   update <page_id> <title> <summary> [parent_id] — добавить/обновить запись
 #   add-children <page_id> <child_ids>   — записать список children (JSON array)
 #   tree [page_id]                       — дерево из индекса (мгновенно, без API)
-#                                          без аргумента берёт buildin.root_page_id
-#                                          из team-config.json (или BUILDIN_ROOT_PAGE_ID)
+#                                          без аргумента: BUILDIN_ROOT_PAGE_ID,
+#                                          иначе buildin.root_page_id из team-config.json
 #   dump                                 — вывести весь индекс для LLM-анализа
 #   stats                                — статистика индекса
 #   stale [days]                         — показать записи старше N дней (default: 30)
@@ -196,8 +196,8 @@ print(f'✓ Added {len(children)} children to {page_id}')
         ROOT="${1:-${BUILDIN_ROOT_PAGE_ID:-}}"
         [[ -z "$ROOT" ]] && {
             echo "Usage: tree <page_id>" >&2
-            echo "       без аргумента корень берётся из buildin.root_page_id в team-config.json" >&2
-            echo "       или из BUILDIN_ROOT_PAGE_ID в .env" >&2
+            echo "       без аргумента корень берётся из BUILDIN_ROOT_PAGE_ID (.env или окружение)," >&2
+            echo "       иначе из buildin.root_page_id в team-config.json" >&2
             exit 1
         }
         ensure_index
@@ -225,6 +225,11 @@ def print_tree(pid, depth=0, max_depth=10):
     if depth < max_depth:
         for cid in page.get('children', []):
             print_tree(cid, depth + 1, max_depth)
+
+if root not in pages:
+    sys.stderr.write('Error: корня %s нет в индексе\n' % root)
+    sys.stderr.write('       проверь buildin.root_page_id / BUILDIN_ROOT_PAGE_ID или отсканируй страницу\n')
+    sys.exit(1)
 
 print_tree(root)
 " "$ROOT" "$INDEX_FILE"

@@ -10,6 +10,12 @@
 # маке его можно было гонять без bats прямо под /bin/bash 3.2 (целевой шелл).
 set -u
 
+# BUILDIN_ROOT_PAGE_ID нет в HUB_KNOWN_SECRETS, поэтому hub_load_env его не
+# сбрасывает, а скрипт ставит его выше team-config.json. Экспортированная
+# переменная (direnv, профиль) ломала бы кейсы «нет корня» и «корень из
+# конфига» на верном коде.
+unset BUILDIN_ROOT_PAGE_ID HUB_OVERLAY_ROOT HUB_ENV_FILE
+
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$TESTS_DIR/../scripts"
 HUB_META_DIR="$TESTS_DIR/../../hub-meta/scripts"
@@ -27,7 +33,14 @@ ok()   { echo "ok:   $1"; }
 # проверку и тест вечно падал бы на самом себе.
 RETIRED_ID='2a904afe-42e9-4ebd'-'a94e-f6fe0cbacf58'
 echo "--- ID конкретной страницы не просочился обратно ---"
-HITS=$(grep -rl "$RETIRED_ID" "$BUILDIN_DIR" "$BOT_API_DIR" 2>/dev/null || true)
+# Только отслеживаемые файлы: рядом лежит gitignored shadow-index.json, и у
+# всех, кто запускал shadow до этой правки, в нём остался старый root_page_id.
+# Скан по каталогу падал бы на личном кеше, а CI с чистым чекаутом молчал бы.
+if git -C "$TESTS_DIR" rev-parse --git-dir > /dev/null 2>&1; then
+    HITS=$(git -C "$TESTS_DIR" grep -l "$RETIRED_ID" -- "$BUILDIN_DIR" "$BOT_API_DIR" 2>/dev/null || true)
+else
+    HITS=$(grep -rl --exclude=shadow-index.json "$RETIRED_ID" "$BUILDIN_DIR" "$BOT_API_DIR" 2>/dev/null || true)
+fi
 if [ -n "$HITS" ]; then
     fail "ID конкретной страницы снова в исходниках:"
     echo "$HITS" | sed 's/^/        /'
@@ -126,6 +139,63 @@ elif grep -q "$RETIRED_ID" "$INDEX"; then
     fail "в созданный индекс попал ID конкретной страницы"
 else
     ok "индекс создаётся валидным JSON без чужого ID"
+fi
+
+echo "--- настоящий team-config.example.json не даёт тихое пустое дерево ---"
+# setup.sh копирует пример как есть (`cp team-config.example.json
+# team-config.json`) и про root_page_id не спрашивает. Если в примере лежит
+# непустой плейсхолдер, guard его пропустит и `tree` у каждой новой команды
+# снова молча напечатает пустое дерево — ровно то, что эта правка убирает.
+rm -f "$OVERLAY/team-config.json"
+cp "$TESTS_DIR/../../../team-config.example.json" "$OVERLAY/team-config.json"
+seed_index
+run_tree ""; RC=$?
+if [ "$RC" -eq 0 ]; then
+    fail "с нетронутым team-config.example.json tree завершился нулём (тихое пустое дерево)"
+elif ! grep -qi 'usage\|root_page_id' "$TMP/err.txt"; then
+    fail "с нетронутым примером нет подсказки (stderr: $(head -c 200 "$TMP/err.txt"))"
+else
+    ok "нетронутый пример даёт отказ с подсказкой, а не пустое дерево"
+fi
+
+# Корень задан, но в индексе его нет — опечатка или неотсканированная страница.
+# Тихий нулевой выход здесь неотличим от «дерево пустое».
+set_config '99999999-9999-9999-9999-999999999999'; seed_index
+run_tree ""; RC=$?
+if [ "$RC" -eq 0 ]; then
+    fail "корень, которого нет в индексе, дал код 0 и пустой вывод"
+else
+    ok "корень, которого нет в индексе, — отказ"
+fi
+
+echo "--- shadow работает без .env и без load-env.sh ---"
+# Описание обещает, что локальные команды не требуют ни токена, ни .env.
+# Обе ветки мягкого бутстрапа до сих пор в CI не исполнялись: каждый кейс
+# выше кладёт в песочницу и load-env.sh, и .env.
+EMPTY_HOME="$TMP/empty-home"
+mkdir -p "$EMPTY_HOME"
+
+BARE="$TMP/bare"
+mkdir -p "$BARE/integrations/buildin/scripts" "$BARE/integrations/hub-meta/scripts"
+cp "$SRC_DIR/buildin-shadow.sh" "$BARE/integrations/buildin/scripts/"
+cp "$HUB_META_DIR/load-env.sh" "$BARE/integrations/hub-meta/scripts/"
+BARE_SHADOW="$BARE/integrations/buildin/scripts/buildin-shadow.sh"
+
+HOME="$EMPTY_HOME" XDG_CONFIG_HOME="$EMPTY_HOME" \
+    /bin/bash "$BARE_SHADOW" stats > "$TMP/out.txt" 2> "$TMP/err.txt"
+if [ $? -ne 0 ]; then
+    fail "stats без .env упал: $(head -c 200 "$TMP/err.txt")"
+else
+    ok "stats работает без .env"
+fi
+
+rm -f "$BARE/integrations/hub-meta/scripts/load-env.sh" "$BARE/integrations/buildin/shadow-index.json"
+HOME="$EMPTY_HOME" XDG_CONFIG_HOME="$EMPTY_HOME" \
+    /bin/bash "$BARE_SHADOW" stats > "$TMP/out.txt" 2> "$TMP/err.txt"
+if [ $? -ne 0 ]; then
+    fail "stats без load-env.sh упал: $(head -c 200 "$TMP/err.txt")"
+else
+    ok "stats работает даже без load-env.sh"
 fi
 
 echo

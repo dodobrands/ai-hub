@@ -50,7 +50,9 @@ except:
 # Получить дочерние page-блоки (type=0) из /api/docs/{id}
 get_child_pages() {
     local page_id="$1"
-    buildin GET "/api/docs/$page_id" 2>/dev/null | python3 -c "
+    # stderr клиента не глушим: при отказе это единственное место, где видна
+    # причина — сам узел в дереве показывается просто как «(error)».
+    buildin GET "/api/docs/$page_id" | python3 -c "
 import json, sys
 page_id = sys.argv[1]
 data = json.load(sys.stdin).get('data', {})
@@ -81,7 +83,14 @@ print_tree() {
     fi
 
     local children
-    children=$(get_child_pages "$page_id")
+    # Сбой внутреннего узла превращает его в лист: соседи и остальное дерево
+    # важнее полноты одной ветки. Без этого `set -eo pipefail` роняет весь обход
+    # на первом же сбойном ребёнке, и всё, что идёт после него, пропадает.
+    # Сбой самого корня — другое дело: печатать нечего, это отказ.
+    children=$(get_child_pages "$page_id") || {
+        [[ "$depth" -eq 0 ]] && return 1
+        children=""
+    }
     while IFS=$'\t' read -r child_id child_title; do
         [[ -z "$child_id" ]] && continue
         print_tree "$child_id" $((depth + 1)) "$max_depth"
@@ -118,9 +127,15 @@ case "$COMMAND" in
     parent)
         PAGE_ID=$(parse_id "$1")
         [[ -z "$PAGE_ID" ]] && { echo "Usage: parent <page_id|url>" >&2; exit 1; }
-        buildin GET "/api/blocks/$PAGE_ID" 2>/dev/null | python3 -c "
+        # Статус проверяем до разбора: у тела отказа нет `data`, и пустые
+        # parentId/spaceId совпали бы между собой — команда напечатала бы
+        # «Root page (space: )», то есть выдала бы отказ за ответ.
+        PARENT_RESP=$(buildin GET "/api/blocks/$PAGE_ID") || exit 1
+        printf '%s' "$PARENT_RESP" | python3 -c "
 import json, sys
 data = json.load(sys.stdin).get('data', {})
+if not data:
+    sys.exit(1)
 parent_id = data.get('parentId', '')
 space_id = data.get('spaceId', '')
 if parent_id == space_id:
