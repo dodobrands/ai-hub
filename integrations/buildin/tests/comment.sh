@@ -578,6 +578,17 @@ fi
 
 CLEANDIR="$TMP/tmpdir-probe"; rm -rf "$CLEANDIR"; mkdir -p "$CLEANDIR"
 
+# ---- #23 (раунд 3): результат успешного запуска лежит в stdout --------------
+write_fixture
+RC=$(run_comment "$PAGE" "$BLOCK" 'в минуту' 'текст')
+OUT_ID=$(stdout | sed -n 's/^discussion: //p')
+ERR_ID=$(stderr | sed -n 's/^discussion: //p' | head -1)
+if [ "$RC" -eq 0 ] && [ -n "$OUT_ID" ] && [ "$OUT_ID" = "$ERR_ID" ] && [ "$(stdout | wc -l | tr -d ' ')" -eq 1 ]; then
+    ok "успешный запуск печатает id треда в stdout и ничего лишнего"
+else
+    fail "id треда не в stdout (rc=$RC): $(stdout | head -3)"
+fi
+
 # ---- #18 (раунд 3): дефолтные пути отката не сталкиваются, права 0600 -------
 # В раунде 1 эта проверка была заявлена в ответе, но в харнесс не попала.
 write_fixture

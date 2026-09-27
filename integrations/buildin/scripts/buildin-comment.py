@@ -95,6 +95,30 @@ def segment_text(segments):
     return "".join(s.get("text", "") for s in (segments or []))
 
 
+# Невидимые пробелы: в типографированных русских текстах NBSP стоит перед тире и
+# после коротких предлогов. Якорь с обычным пробелом в таком месте не найдётся, а
+# в сообщении оба пробела выглядят одинаково — агент будет повторять тот же якорь.
+INVISIBLE = {
+    "\u00a0": "NBSP",
+    "\u202f": "узкий NBSP",
+    "\u2007": "цифровой пробел",
+    "\u200b": "нулевой пробел",
+    "\ufeff": "BOM",
+}
+
+
+def invisible_note(text):
+    """Строка-предупреждение о невидимых символах в тексте, либо пустая."""
+    found = {}
+    for i, ch in enumerate(text):
+        if ch in INVISIBLE:
+            found.setdefault(INVISIBLE[ch], []).append(i)
+    if not found:
+        return ""
+    parts = ["%s на позициях %s" % (name, ", ".join(map(str, pos))) for name, pos in sorted(found.items())]
+    return "\nВнимание, в тексте есть невидимые символы: %s." % "; ".join(parts)
+
+
 def describe_segments(segments):
     """Разбор сегментов для сообщения об ошибке: индекс, текст, форматирование."""
     lines = []
@@ -155,8 +179,9 @@ def find_anchor(segments, anchor, occurrence=None):
     if not offsets:
         raise AnchorError(
             "Якоря нет в тексте блока. Якорь должен целиком лежать внутри одного сегмента.\n"
-            "Текст блока: «%s»\nСегменты:\n%s\n"
-            "Сверьте фразу с текстом блока (важны регистр и пробелы)." % (full, describe_segments(segments))
+            "Текст блока: «%s»%s\nСегменты:\n%s\n"
+            "Сверьте фразу с текстом блока (важны регистр и пробелы)."
+            % (full, invisible_note(full), describe_segments(segments))
         )
 
     if occurrence is not None:
@@ -179,9 +204,9 @@ def find_anchor(segments, anchor, occurrence=None):
             listing.append("  %d) …%s…  (%s)" % (n, full[lo:hi], where))
         raise AnchorError(
             "Якорь встречается в блоке %d раз(а) — непонятно, что выделять.\n"
-            "Текст блока: «%s»\nВхождения:\n%s\n"
+            "Текст блока: «%s»%s\nВхождения:\n%s\n"
             "Удлините якорь до однозначного или выберите вхождение: --occurrence=N."
-            % (len(chosen), full, "\n".join(listing))
+            % (len(chosen), full, invisible_note(full), "\n".join(listing))
         )
 
     hit = _locate(segments, chosen[0], len(anchor))
