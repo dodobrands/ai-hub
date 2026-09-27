@@ -254,6 +254,17 @@ def check_resplit(old, new, index, discussion_id):
     for p in parts:
         if not p.get("text"):
             raise AnchorError("Перенарезка дала пустой сегмент — отмена.")
+        # Треды, уже висевшие на разрезаемом сегменте, обязаны пережить разрез
+        # на каждой части. Их потеря — тихая пропажа чужой подсветки, то есть
+        # ровно то, от чего защищает вся команда, а сравнение полей её не ловит:
+        # discussions из него исключены намеренно.
+        src_threads = set(src.get("discussions") or [])
+        new_threads = set(p.get("discussions") or []) - {discussion_id}
+        if new_threads != src_threads:
+            raise AnchorError(
+                "Перенарезка потеряла треды, уже висевшие на сегменте: было %s, стало %s."
+                % (sorted(src_threads), sorted(new_threads))
+            )
         rest_src = {k: v for k, v in src.items() if k not in ("text", "discussions")}
         rest_new = {k: v for k, v in p.items() if k not in ("text", "discussions")}
         if rest_src != rest_new:
@@ -378,11 +389,58 @@ def build_ops(block, block_id, anchor, text, now, user_id, occurrence=None):
             "discussion": discussion_id, "comment": comment_id}
 
 
+def read_block(doc, block_id):
+    """Блок из ответа /api/docs, либо None, если его там нет."""
+    blocks = (doc.get("data") or {}).get("blocks") or {}
+    return blocks.get(block_id)
+
+
+def block_state(block):
+    """(треды в списке блока, треды с подсветкой в сегментах)."""
+    segments = ((block.get("data") or {}).get("segments")) or []
+    listed = set(block.get("discussions") or [])
+    lit = {t for s in segments for t in (s.get("discussions") or [])}
+    return listed, lit
+
+
+def verdict(before, after, block_id, ours):
+    """Исход записи по снимкам блока до и после неё: (статус, потерявшие подсветку).
+
+    Четыре разных исхода, потому что и делать с ними надо разное:
+      unverified  — блока нет в ответе: это конверт ошибки или чужая страница,
+                    об исходе записи ничего не известно, гасить ничего нельзя;
+      not-applied — нашего треда нет даже в списке блока. listAfter аддитивен, и
+                    конкурент наш id из списка не убирает, значит транзакция не
+                    легла. Создавать было нечего, повтор безопасен;
+      lost-ours   — тред в списке, но подсветки нет: нас перезаписали;
+      ok          — подсветка на месте.
+
+    Раньше все три неудачных исхода сводились к «нас перезаписали», и на отказ
+    API команда отвечала самоочисткой несуществующих записей или гашением
+    собственного успешного треда.
+    """
+    after_block = read_block(after, block_id)
+    if after_block is None:
+        return "unverified", []
+
+    after_listed, after_lit = block_state(after_block)
+    if ours in after_lit:
+        before_listed, before_lit = block_state(read_block(before, block_id) or {})
+        # Давно осиротевшие — те, что были в списке без подсветки ещё до нас, —
+        # вычитаем: это не наша работа и не повод для тревоги.
+        return "ok", sorted((after_listed - after_lit) - (before_listed - before_lit))
+    if ours not in after_listed:
+        return "not-applied", []
+    return "lost-ours", []
+
+
 def parse_args(argv):
-    positional, occurrence, end_of_opts = [], None, False
+    positional, occurrence, end_of_opts, as_verdict = [], None, False, False
     for a in argv:
         if end_of_opts or not a.startswith("--"):
             positional.append(a)
+        elif a == "--verdict":
+            as_verdict = True
         elif a == "--":
             # Всё после «--» — значения. Без этого якорь или текст с ведущими
             # дефисами («--force», «-- не согласен») не доходит до билдера
@@ -395,18 +453,37 @@ def parse_args(argv):
             occurrence = int(raw)
         else:
             raise SystemExit("Error: неизвестный флаг: %s" % a)
+    if as_verdict:
+        if len(positional) != 4:
+            raise SystemExit("Usage: buildin-comment.py --verdict -- <before_json> <after_json> "
+                             "<block_id> <discussion_id>")
+        return ("verdict",) + tuple(positional)
     if len(positional) != 6:
         raise SystemExit(__doc__.strip())
     doc_json, block_id, anchor, text, now, user_id = positional
-    return doc_json, block_id, anchor, text, int(now), user_id, occurrence
+    return ("build", doc_json, block_id, anchor, text, int(now), user_id, occurrence)
+
+
+def load_doc(path):
+    """Ответ /api/docs или пустой документ, если это не JSON (конверт ошибки)."""
+    try:
+        return json.loads(sys.stdin.read() if path == "-" else open(path, encoding="utf-8").read())
+    except ValueError:
+        return {}
 
 
 def main():
-    doc_json, block_id, anchor, text, now, user_id, occurrence = parse_args(sys.argv[1:])
+    parsed = parse_args(sys.argv[1:])
+    if parsed[0] == "verdict":
+        _, before_path, after_path, block_id, ours = parsed
+        status, lost = verdict(load_doc(before_path), load_doc(after_path), block_id, ours)
+        print(status)
+        print(" ".join(lost))
+        return
 
-    raw = sys.stdin.read() if doc_json == "-" else open(doc_json, encoding="utf-8").read()
-    blocks = (json.loads(raw).get("data") or {}).get("blocks") or {}
-    block = blocks.get(block_id)
+    _, doc_json, block_id, anchor, text, now, user_id, occurrence = parsed
+
+    block = read_block(load_doc(doc_json), block_id)
     if block is None:
         raise SystemExit(
             "Error: блок %s не найден на странице. "
@@ -418,7 +495,9 @@ def main():
     except AnchorError as e:
         raise SystemExit("Error: %s" % e)
 
-    print(json.dumps(result, ensure_ascii=False))
+    # Без ensure_ascii=False: вывод разбирает json.load, ему \uXXXX всё равно,
+    # а печать не-ASCII падает под не-UTF-8 локалью (LC_ALL=C).
+    print(json.dumps(result))
 
 
 if __name__ == "__main__":

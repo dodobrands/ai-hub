@@ -48,12 +48,15 @@ buildin() {
     "$SCRIPT_DIR/buildin.sh" "$@"
 }
 
+# Формат UUID — одной константой на файл: три копии пришлось бы держать в
+# синхроне руками, ровно от этого уходили при выносе parse_page_and_block_id.
+UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
 # Извлечь UUID из URL или вернуть как есть
 parse_id() {
     local input="$1"
-    local uuid_re='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
     local uuid
-    uuid=$(echo "$input" | grep -oE "$uuid_re" | tail -1 || true)
+    uuid=$(echo "$input" | grep -oE "$UUID_RE" | tail -1 || true)
     echo "${uuid:-$input}"
 }
 
@@ -88,16 +91,15 @@ read_arg_text() {
 parse_page_and_block_id() {
     local input="$1"
     local maybe_block="${2:-}"
-    local uuid_re='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 
     # Полный URL — buildin.ai/<space>/<page>: страница это последний UUID до «#»
     # (как в parse_id), блок — из якоря после «#».
-    PAGE_ID=$(echo "${input%%#*}" | grep -oE "$uuid_re" | tail -1 || true)
+    PAGE_ID=$(echo "${input%%#*}" | grep -oE "$UUID_RE" | tail -1 || true)
     [[ -z "$PAGE_ID" ]] && { echo "Error: no UUID found in '$input'" >&2; exit 1; }
 
     BLOCK_ID="$maybe_block"
     if [[ -z "$BLOCK_ID" && "$input" == *"#"* ]]; then
-        BLOCK_ID=$(echo "${input#*#}" | grep -oE "$uuid_re" | head -1 || true)
+        BLOCK_ID=$(echo "${input#*#}" | grep -oE "$UUID_RE" | head -1 || true)
     fi
 }
 
@@ -142,8 +144,11 @@ transaction() {
     local OPERATIONS="$2"
     # Тело собираем отдельным присваиванием, а не подстановкой прямо в аргументе:
     # при подстановке сбой сборки прячется от set -e и POST уходит с пустым телом.
+    # «|| return» обязателен, а не избыточен: в условии if/&&/|| bash отключает
+    # set -e во всём теле вызванной функции, и без него сбой сборки тела не
+    # прервал бы её — POST ушёл бы с пустым телом.
     local body
-    body=$(tx_body "$SPACE_ID" "$OPERATIONS")
+    body=$(tx_body "$SPACE_ID" "$OPERATIONS") || return
     buildin POST "/api/records/transactions" "$body"
 }
 
@@ -481,7 +486,6 @@ if not found:
         parse_page_and_block_id "$INPUT"
         # Первый позиционный считаем блоком, только если он целиком UUID: якорь
         # такой формы был бы патологией, а обычная фраза ею не притворится.
-        UUID_RE='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
         if [[ "${ARGS[0]:-}" =~ ^$UUID_RE$ ]]; then
             BLOCK_ID="${ARGS[0]}"
             ARGS=("${ARGS[@]:1}")
@@ -519,14 +523,18 @@ if not found:
             # затёр бы откат предыдущего РЕАЛЬНОГО комментария.
             echo "$BUILT" | python3 -c "
 import json, sys
-print(json.dumps(json.load(sys.stdin)['ops'], ensure_ascii=False, indent=2))"
+# Пишем в буфер напрямую: печать не-ASCII через stdout падает под не-UTF-8
+# локалью, а превью должно оставаться читаемым.
+out = json.dumps(json.load(sys.stdin)['ops'], ensure_ascii=False, indent=2)
+sys.stdout.buffer.write(out.encode('utf-8') + b'\n')"
             exit 0
         fi
 
         # spaceId берём у самого блока — тот же, что уходит в args операций
         SPACE_ID=$(python3 -c "
 import json, sys
-blocks = (json.load(open(sys.argv[1])).get('data') or {}).get('blocks') or {}
+# encoding обязателен: под не-UTF-8 локалью open() берёт ASCII и падает
+blocks = (json.load(open(sys.argv[1], encoding='utf-8')).get('data') or {}).get('blocks') or {}
 print((blocks.get(sys.argv[2]) or {}).get('spaceId', ''))
 " "$DOC_FILE" "$BLOCK_ID")
 
@@ -538,7 +546,7 @@ print((blocks.get(sys.argv[2]) or {}).get('spaceId', ''))
         python3 -c "
 import json, sys
 def segs(path):
-    blocks = (json.load(open(path)).get('data') or {}).get('blocks') or {}
+    blocks = (json.load(open(path, encoding='utf-8')).get('data') or {}).get('blocks') or {}
     return ((blocks.get(sys.argv[3]) or {}).get('data') or {}).get('segments')
 if segs(sys.argv[1]) != segs(sys.argv[2]):
     sys.exit('Error: блок изменился, пока готовился комментарий — запись отменена.\n'
@@ -557,70 +565,88 @@ print(built['discussion'])
 " "$OPS_DIR")
 
         ROLLBACK_BODY=$(tx_body "$SPACE_ID" "$(cat "$OPS_DIR/rollback.json")")
-        printf '%s\n' "$ROLLBACK_BODY" > "$ROLLBACK_OUT"
+        # umask 077 на подоболочку: дефолтный путь создаёт mktemp с правами 0600,
+        # а перенаправление по --rollback-out дало бы права по umask, хотя в
+        # файле лежит полный текст блока. У уже существующего файла права свои.
+        (umask 077; printf '%s\n' "$ROLLBACK_BODY" > "$ROLLBACK_OUT")
         echo "Откат: $ROLLBACK_OUT" >&2
 
-        transaction "$SPACE_ID" "$(cat "$OPS_DIR/ops.json")"
-        # О созданном треде сообщаем сразу после записи, до любых проверок:
-        # это единственный необратимый эффект команды, и если следующий шаг
-        # упадёт, повтор вслепую создаст второй тред на той же фразе.
+        # О созданном треде сообщаем ДО записи: id известен сразу после билдера,
+        # а если POST оборвётся, узнать его будет неоткуда — curl в buildin.sh
+        # идёт без -S и на обрыве молчит. Повтор вслепую повесил бы второй тред
+        # на ту же фразу: видимый текст блока после разреза не меняется.
         echo "discussion: $DISCUSSION" >&2
+        if ! transaction "$SPACE_ID" "$(cat "$OPS_DIR/ops.json")"; then
+            echo "Error: исход записи неизвестен (discussion: $DISCUSSION)." >&2
+            echo "       Не повторяйте команду вслепую — сначала посмотрите блок на странице." >&2
+            exit 2
+        fi
 
         # Проверка ПОСЛЕ записи. Проверка до неё сужает окно, но не закрывает:
         # несколько процессов успевают сделать оба GET раньше первого POST, и
         # тогда побеждает последний писавший segments.
-        FRESH_FILE=$(mktemp)
+        # FRESH_FILE переиспользуем: второй mktemp оставлял первый файл с полной
+        # копией страницы в $TMPDIR навсегда — trap раскрывает переменную на
+        # выходе и удалил бы только последний.
         if ! buildin GET "/api/docs/$PAGE_ID" > "$FRESH_FILE"; then
             echo "Error: транзакция отправлена (discussion: $DISCUSSION), но проверить результат не удалось." >&2
             echo "       Не повторяйте команду вслепую — сначала посмотрите блок на странице." >&2
             exit 2
         fi
 
-        VERDICT=$(python3 -c "
-import json, sys
-before_path, after_path, block_id, ours = sys.argv[1:5]
+        VERDICT=$(python3 "$SCRIPT_DIR/buildin-comment.py" --verdict -- \
+            "$DOC_FILE" "$FRESH_FILE" "$BLOCK_ID" "$DISCUSSION")
+        STATUS=$(echo "$VERDICT" | sed -n 1p)
+        LOST=$(echo "$VERDICT" | sed -n 2p)
 
-def state(path):
-    blocks = (json.load(open(path)).get('data') or {}).get('blocks') or {}
-    block = blocks.get(block_id) or {}
-    segments = ((block.get('data') or {}).get('segments')) or []
-    return set(block.get('discussions') or []), {t for s in segments for t in (s.get('discussions') or [])}
-
-before_listed, before_lit = state(before_path)
-after_listed, after_lit = state(after_path)
-
-# Базой служит СПИСОК тредов блока после записи, а не подсветка нашего
-# снапшота: треды, созданные параллельно, в снапшот попасть не могли, и
-# сверка с ним пропускала ровно тот случай, ради которого заведена.
-# listAfter аддитивен, поэтому в списке после записи есть и чужие треды.
-# Давно осиротевшие — те, что были в списке без подсветки ещё до нас, —
-# вычитаем: это не наша работа и не повод для тревоги.
-print('ok' if ours in after_lit else 'lost-ours')
-print(' '.join(sorted((after_listed - after_lit) - (before_listed - before_lit))))
-" "$DOC_FILE" "$FRESH_FILE" "$BLOCK_ID" "$DISCUSSION")
-
-        if [[ "$(echo "$VERDICT" | sed -n 1p)" != "ok" ]]; then
-            # Блок переписали поверх нас. Наших сегментов там уже нет, поэтому
-            # полный откат применять НЕЛЬЗЯ — он вернул бы наш снапшот и стёр
-            # подсветку победителя. Снимаем только свои записи.
-            echo "Error: тред создан, но подсветка не закрепилась — блок перезаписали параллельно." >&2
-            transaction "$SPACE_ID" "$(cat "$OPS_DIR/rollback_records.json")" > /dev/null
-            echo "       Тред $DISCUSSION снят: убран из блока и погашен. Чужие правки не тронуты." >&2
-            echo "       Файл отката $ROLLBACK_OUT применять НЕ надо — он вернёт устаревшие сегменты." >&2
-            echo "       Повторите команду: она возьмёт свежее состояние блока." >&2
-            exit 1
-        fi
+        case "$STATUS" in
+            unverified)
+                # Блока нет в ответе: конверт ошибки, чужая страница, обрезанное
+                # тело. Об исходе записи ничего не известно, поэтому ничего не
+                # гасим — самоочистка тут снимала бы, возможно, успешный тред.
+                echo "Error: проверочное чтение не вернуло блок — исход записи неизвестен." >&2
+                echo "       Тред: $DISCUSSION. Не повторяйте команду вслепую — посмотрите блок на странице." >&2
+                exit 2
+                ;;
+            not-applied)
+                # Нашего треда нет даже в списке блока. listAfter аддитивен, и
+                # конкурент наш id из списка не убирает — значит транзакция не
+                # легла: создавать было нечего, повтор безопасен.
+                echo "Error: транзакция не применилась — треда $DISCUSSION нет в списке блока." >&2
+                echo "       Ничего создано не было, повтор безопасен." >&2
+                echo "       Файл отката $ROLLBACK_OUT применять не надо." >&2
+                exit 1
+                ;;
+            lost-ours)
+                # Блок переписали поверх нас. Наших сегментов там уже нет, поэтому
+                # полный откат применять НЕЛЬЗЯ — он вернул бы наш снапшот и стёр
+                # подсветку победителя. Предупреждаем ДО самоочистки: её сбой не
+                # должен проглотить этот запрет, иначе пользователь применит
+                # полный откат, увидев только путь к нему.
+                echo "Error: тред создан, но подсветка не закрепилась — блок перезаписали параллельно." >&2
+                echo "       Файл отката $ROLLBACK_OUT применять НЕ надо — он вернёт устаревшие сегменты." >&2
+                if transaction "$SPACE_ID" "$(cat "$OPS_DIR/rollback_records.json")" > /dev/null; then
+                    echo "       Тред $DISCUSSION снят: убран из блока и погашен. Чужие правки не тронуты." >&2
+                    echo "       Повторите команду: она возьмёт свежее состояние блока." >&2
+                    exit 1
+                fi
+                echo "       Снять тред не удалось: $DISCUSSION остался в списке блока без подсветки." >&2
+                echo "       Снимите его вручную или повторите команду и уберите лишний тред." >&2
+                exit 2
+                ;;
+        esac
 
         # Именно if, а не «[[ … ]] && { … }»: это последняя команда ветки, и её
         # статус стал бы кодом выхода всей команды — пустой список превращался
         # бы в rc=1 на совершенно успешной записи.
-        LOST=$(echo "$VERDICT" | sed -n 2p)
         if [[ -n "$LOST" ]]; then
             echo "ВНИМАНИЕ: параллельная запись лишила подсветки чужие треды: ${LOST// /, }" >&2
             echo "          Они остались в списке блока, но на странице их не видно." >&2
             echo "          Текст цел — посмотреть: buildin-pages.sh comments $PAGE_ID $BLOCK_ID" >&2
-            echo "          Вернуть подсветку можно только новым комментарием: сама команда" >&2
-            echo "          не угадывает, к какой фразе чужой тред был привязан." >&2
+            echo "          Если это тред другого запуска comment, упавшего с ошибкой про" >&2
+            echo "          подсветку, — он снимется сам и будет повторён, реагировать не надо." >&2
+            echo "          Иначе вернуть подсветку можно только новым комментарием: сама" >&2
+            echo "          команда не угадывает, к какой фразе чужой тред был привязан." >&2
         fi
         ;;
 

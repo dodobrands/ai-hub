@@ -102,6 +102,22 @@ elif how == "touch-neighbor":
         out[-1] = dict(out[-1], enhancer={"bold": True})
         return out
     bc.split_segments = broken
+elif how == "touch-left-neighbor":
+    # то же, но СЛЕВА: правую половину условия соседей ломает touch-neighbor,
+    # левую — только эта поломка, и только если якорь не в первом сегменте
+    def broken(s, i, p, a, d):
+        out = orig(s, i, p, a, d)
+        out[0] = dict(out[0], enhancer={"bold": True})
+        return out
+    bc.split_segments = broken
+elif how == "drop-threads":
+    # разрез теряет треды, которые уже висели на разрезаемом сегменте
+    def broken(s, i, p, a, d):
+        out = orig(s, i, p, a, d)
+        for x in out[i:i + 3]:
+            x["discussions"] = [t for t in (x.get("discussions") or []) if t == d]
+        return out
+    bc.split_segments = broken
 try:
     bc.build_ops(block, block_id, anchor, "t", 1, "u")
     print("НЕ ПОЙМАЛ")
@@ -444,4 +460,90 @@ print('overlap:', sorted(both))
 sys.exit(1 if both else 0)
 " "$OPS_PY"
     [ "$status" -eq 0 ]
+}
+
+@test "resplit check catches a split that touches the segment before the anchor" {
+    mkdoc '[{"text": "head ", "type": 0, "enhancer": {}}, {"text": "alpha beta gamma", "type": 0, "enhancer": {}}]'
+    result=$(build_broken "touch-left-neighbor" "beta")
+    [[ "$result" == *"задела соседние сегменты"* ]]
+}
+
+@test "threads already on the segment survive the split" {
+    mkdoc '[{"text": "alpha beta gamma", "type": 0, "enhancer": {}, "discussions": ["88888888-8888-4888-8888-888888888888"]}]'
+    result=$(build "beta" "note" | probe "
+segs = seg_op['args']['segments']
+old = '88888888-8888-4888-8888-888888888888'
+print(all(old in (s.get('discussions') or []) for s in segs),
+      sorted(x for s in segs for x in (s.get('discussions') or []) if x != old) == [r['discussion']])")
+    [ "$result" = "True True" ]
+}
+
+@test "resplit check catches a split that drops pre-existing threads" {
+    mkdoc '[{"text": "alpha beta gamma", "type": 0, "enhancer": {}, "discussions": ["88888888-8888-4888-8888-888888888888"]}]'
+    result=$(build_broken "drop-threads" "beta")
+    [[ "$result" == *"потеряла треды, уже висевшие на сегменте"* ]]
+}
+
+# ---- вердикт исхода записи ---------------------------------------------------
+
+# Состояние блока файлом: $1 — треды в списке, $2 — треды с подсветкой.
+mkstate() {
+    python3 -c "
+import json, sys
+block_id, listed, lit = sys.argv[1:4]
+lit = json.loads(lit)
+seg = {'text': 'alpha beta', 'type': 0, 'enhancer': {}}
+if lit:
+    seg['discussions'] = lit
+print(json.dumps({'data': {'blocks': {block_id: {
+    'uuid': block_id, 'discussions': json.loads(listed),
+    'data': {'segments': [seg]}}}}}))
+" "$BLOCK" "$1" "$2"
+}
+
+verdict() { python3 "$OPS_PY" --verdict -- "$1" "$2" "$BLOCK" "ours"; }
+
+@test "verdict: highlighted thread is a success" {
+    mkstate '[]' '[]' > "$BATS_TEST_TMPDIR/b.json"
+    mkstate '["ours"]' '["ours"]' > "$BATS_TEST_TMPDIR/a.json"
+    result=$(verdict "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json" | tr '\n' '|')
+    [ "$result" = "ok||" ]
+}
+
+@test "verdict: error envelope is unverified, not a lost race" {
+    mkstate '[]' '[]' > "$BATS_TEST_TMPDIR/b.json"
+    printf '{"code":500,"msg":"no rights"}' > "$BATS_TEST_TMPDIR/a.json"
+    [ "$(verdict "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json" | head -1)" = "unverified" ]
+}
+
+@test "verdict: non-json body is unverified" {
+    mkstate '[]' '[]' > "$BATS_TEST_TMPDIR/b.json"
+    printf 'upstream timeout' > "$BATS_TEST_TMPDIR/a.json"
+    [ "$(verdict "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json" | head -1)" = "unverified" ]
+}
+
+@test "verdict: thread missing from the block list means the write did not apply" {
+    mkstate '[]' '[]' > "$BATS_TEST_TMPDIR/b.json"
+    mkstate '[]' '[]' > "$BATS_TEST_TMPDIR/a.json"
+    [ "$(verdict "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json" | head -1)" = "not-applied" ]
+}
+
+@test "verdict: listed but unlit thread is a lost race" {
+    mkstate '[]' '[]' > "$BATS_TEST_TMPDIR/b.json"
+    mkstate '["ours"]' '[]' > "$BATS_TEST_TMPDIR/a.json"
+    [ "$(verdict "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json" | head -1)" = "lost-ours" ]
+}
+
+@test "verdict: a thread that lost its highlight is named" {
+    mkstate '[]' '[]' > "$BATS_TEST_TMPDIR/b.json"
+    mkstate '["ours","theirs"]' '["ours"]' > "$BATS_TEST_TMPDIR/a.json"
+    result=$(verdict "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json" | tr '\n' '|')
+    [ "$result" = "ok|theirs|" ]
+}
+
+@test "verdict: a thread orphaned before the run is not blamed on us" {
+    mkstate '["theirs"]' '[]' > "$BATS_TEST_TMPDIR/b.json"
+    mkstate '["theirs","ours"]' '["ours"]' > "$BATS_TEST_TMPDIR/a.json"
+    result=$(verdict "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json" | tr '\n' '|')
+    [ "$result" = "ok||" ]
 }
