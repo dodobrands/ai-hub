@@ -2,6 +2,9 @@
 # Склейка URL в kaiten.sh: эндпоинт без ведущего слэша не должен превращаться
 # в ".../api/latestspaces" (Kaiten отвечает на такое 401, и причина выглядит как
 # нехватка прав). Сети нет: curl подменяется стабом, который печатает полученный URL.
+#
+# `|| false` после `[[ ]]`: в bash 3.2 (на маке bats идёт под ним) упавшее `[[ ]]` в середине
+# теста тест не роняет.
 
 setup() {
     REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/../../.." && pwd)"
@@ -39,24 +42,24 @@ teardown() {
 @test "endpoint with a leading slash: URL is joined as-is" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh" GET /spaces
     [ "$status" -eq 0 ]
-    [[ "$output" == *"https://example.invalid/api/latest/spaces"* ]]
+    [[ "$output" == *"https://example.invalid/api/latest/spaces"* ]] || false
 }
 
 @test "endpoint without a slash: the slash is added, not swallowed" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh" GET spaces
     [ "$status" -eq 0 ]
-    [[ "$output" == *"https://example.invalid/api/latest/spaces"* ]]
-    [[ "$output" != *"latestspaces"* ]]
+    [[ "$output" == *"https://example.invalid/api/latest/spaces"* ]] || false
+    [[ "$output" != *"latestspaces"* ]] || false
 }
 
 @test "a nested path without a slash is normalized too" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh" GET cards/42
     [ "$status" -eq 0 ]
-    [[ "$output" == *"https://example.invalid/api/latest/cards/42"* ]]
+    [[ "$output" == *"https://example.invalid/api/latest/cards/42"* ]] || false
 }
 
 @test "the default endpoint stays /users/current" {
     run bash "$SANDBOX/integrations/kaiten/scripts/kaiten.sh"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"https://example.invalid/api/latest/users/current"* ]]
+    [[ "$output" == *"https://example.invalid/api/latest/users/current"* ]] || false
 }

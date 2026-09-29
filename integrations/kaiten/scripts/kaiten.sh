@@ -38,14 +38,26 @@ METHOD="${1:-GET}"
 ENDPOINT="${2:-/users/current}"
 BODY="$3"
 
-# Файлы Kaiten принимает только multipart-запросом, JSON-тело для них не годится. Метод при
-# этом остаётся настоящим HTTP-методом: уровни доступа ниже проверяют загрузку как обычную запись.
+# Файлы Kaiten принимает только multipart-запросом, JSON-тело для них не годится. Загрузка —
+# это POST, поэтому уровни доступа ниже проверяют её как обычную запись.
 UPLOAD_FILE=""
 if [[ "$BODY" == "--file" ]]; then
     UPLOAD_FILE="$4"
     BODY=""
-    if [[ ! -f "$UPLOAD_FILE" ]]; then
-        echo "Error: file not found: $UPLOAD_FILE" >&2
+    # Второй --file молча потерялся бы: загрузился бы только первый файл, и с кодом 0.
+    if [[ $# -gt 4 ]]; then
+        echo "Error: one file per call: <method> <endpoint> --file <path>" >&2
+        exit 1
+    fi
+    # Нечитаемый файл curl роняет с кодом 26, а ниже любой сбой curl выдаётся за таймаут сети.
+    if [[ ! -f "$UPLOAD_FILE" || ! -r "$UPLOAD_FILE" ]]; then
+        echo "Error: file not found or not readable: $UPLOAD_FILE" >&2
+        exit 1
+    fi
+    # В .env лежат токены. Агент, исполняющий текст чужой карточки, не должен приложить их к ней
+    # одной командой.
+    if [[ "$(basename "$UPLOAD_FILE")" == ".env" || ( -n "$HUB_ENV_FILE" && "$UPLOAD_FILE" -ef "$HUB_ENV_FILE" ) ]]; then
+        echo "Error: refusing to upload a .env with tokens: $UPLOAD_FILE" >&2
         exit 1
     fi
 fi
@@ -63,6 +75,21 @@ fi
 KAITEN_ACCESS_LEVEL="${KAITEN_ACCESS_LEVEL:-read_write_archive}"
 
 METHOD_UPPER=$(echo "$METHOD" | tr '[:lower:]' '[:upper:]')
+
+if [[ -n "$UPLOAD_FILE" ]]; then
+    # С GET файл ушёл бы телом запроса и прошёл бы уровень read, а загрузка — это запись.
+    if [[ "$METHOD_UPPER" != "POST" ]]; then
+        echo "Error: --file works only with POST" >&2
+        exit 1
+    fi
+    # По числовому id карточки Kaiten тоже отвечает 200, но кладёт файл на старый маршрут
+    # с постоянной публичной ссылкой. По коду ответа ошибку не видно, поэтому режем до запроса.
+    legacy_upload_re='^/cards/[0-9]+([/?]|$)'
+    if [[ "$ENDPOINT" =~ $legacy_upload_re ]]; then
+        echo "Error: upload by numeric card id creates a public legacy file. Use /cards/<card_uid>/files (uid: ./kaiten.sh GET /cards/<id> | jq -r .uid)" >&2
+        exit 1
+    fi
+fi
 
 access_level_num() {
     case "$KAITEN_ACCESS_LEVEL" in
