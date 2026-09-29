@@ -579,6 +579,14 @@ curl -X POST "https://{domain}/api/latest/cards/${card_uid}/files" \
   -F "file=@/path/to/report.md"
 ```
 
+То же через `kaiten.sh` — `--file` вместо JSON-тела, уровень доступа нужен как для записи (`read_write`):
+
+```bash
+./kaiten.sh POST "/cards/${card_uid}/files" --file /path/to/report.md
+```
+
+Замер: загрузка по `card_uid` отдаёт 200 с `id`-UUID, `size` строкой и `entity_type: "card"`, а в `files` карточки файл появляется с `type` = `11`.
+
 Скачивание — через редирект, **без** `-H Authorization` на втором шаге: `curl` при редиректе на другой хост заголовок и так сбрасывает, но передавать токен на подписанную ссылку нельзя в принципе.
 
 ```bash

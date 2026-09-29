@@ -1,6 +1,6 @@
 #!/bin/bash
 # Kaiten API CLI - универсальный скрипт для вызова Kaiten API
-# Usage: ./kaiten.sh <method> <endpoint> [json_body]
+# Usage: ./kaiten.sh <method> <endpoint> [json_body | --file <path>]
 
 set -e
 
@@ -37,6 +37,18 @@ fi
 METHOD="${1:-GET}"
 ENDPOINT="${2:-/users/current}"
 BODY="$3"
+
+# Файлы Kaiten принимает только multipart-запросом, JSON-тело для них не годится. Метод при
+# этом остаётся настоящим HTTP-методом: уровни доступа ниже проверяют загрузку как обычную запись.
+UPLOAD_FILE=""
+if [[ "$BODY" == "--file" ]]; then
+    UPLOAD_FILE="$4"
+    BODY=""
+    if [[ ! -f "$UPLOAD_FILE" ]]; then
+        echo "Error: file not found: $UPLOAD_FILE" >&2
+        exit 1
+    fi
+fi
 
 # Эндпоинт склеивается с базой как есть (${KAITEN_API}${ENDPOINT}), поэтому без ведущего
 # слэша получается ".../api/latestspaces" — Kaiten отвечает 401, и выглядит это как
@@ -147,14 +159,22 @@ esac
 CURL_ARGS=(
     -s
     --connect-timeout 10
-    --max-time 30
     -X "$METHOD_UPPER"
     -H "Authorization: Bearer $KAITEN_TOKEN"
-    -H "Content-Type: application/json"
 )
 
-if [[ -n "$BODY" ]]; then
-    CURL_ARGS+=(-d "$BODY")
+if [[ -n "$UPLOAD_FILE" ]]; then
+    # Тип multipart с границей curl ставит сам — заголовок JSON его бы перебил. Время загрузки
+    # растёт с размером файла, поэтому потолок выше. Путь в кавычках: без них curl режет его
+    # по «;» и «,» как параметры поля.
+    _upload_path="${UPLOAD_FILE//\\/\\\\}"
+    CURL_ARGS+=(--max-time 300 -F "file=@\"${_upload_path//\"/\\\"}\"")
+    unset _upload_path
+else
+    CURL_ARGS+=(--max-time 30 -H "Content-Type: application/json")
+    if [[ -n "$BODY" ]]; then
+        CURL_ARGS+=(-d "$BODY")
+    fi
 fi
 
 # Клиентский троттлинг (opt-in через env KAITEN_RATE): пауза ПЕРЕД запросом. Дефолт — без
