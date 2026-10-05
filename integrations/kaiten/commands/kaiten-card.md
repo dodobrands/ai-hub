@@ -54,6 +54,19 @@ KAITEN_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integration
 "$KAITEN_SCRIPTS/kaiten-cards.sh" comment <card_id> "Текст комментария"
 ```
 
+## Прикрепить файл
+
+Файл грузится по `uid` карточки, а не по числовому `card_id` из ссылки. С числовым id Kaiten
+создал бы файл с публичной ссылкой, поэтому `kaiten.sh` такой вызов отклоняет.
+
+```bash
+card_uid=$("$KAITEN_SCRIPTS/kaiten.sh" GET "/cards/<card_id>" | jq -r '.uid')
+"$KAITEN_SCRIPTS/kaiten.sh" POST "/cards/${card_uid}/files" --file /path/to/report.html
+```
+
+Один файл за вызов. Большой файл грузи с увеличенным таймаутом вызова: у загрузки потолок
+5 минут, а у Bash-инструмента по умолчанию 2.
+
 ## Переместить в колонку
 
 Если `column_id` не известен — сначала получи список колонок доски:

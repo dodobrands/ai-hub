@@ -1,6 +1,6 @@
 #!/bin/bash
 # Kaiten API CLI - универсальный скрипт для вызова Kaiten API
-# Usage: ./kaiten.sh <method> <endpoint> [json_body]
+# Usage: ./kaiten.sh <method> <endpoint> [json_body | --file <path>]
 
 set -e
 
@@ -38,6 +38,30 @@ METHOD="${1:-GET}"
 ENDPOINT="${2:-/users/current}"
 BODY="$3"
 
+# Файлы Kaiten принимает только multipart-запросом, JSON-тело для них не годится. Загрузка —
+# это POST, поэтому уровни доступа ниже проверяют её как обычную запись.
+UPLOAD_FILE=""
+if [[ "$BODY" == "--file" ]]; then
+    UPLOAD_FILE="$4"
+    BODY=""
+    # Второй --file молча потерялся бы: загрузился бы только первый файл, и с кодом 0.
+    if [[ $# -gt 4 ]]; then
+        echo "Error: one file per call: <method> <endpoint> --file <path>" >&2
+        exit 1
+    fi
+    # Нечитаемый файл curl роняет с кодом 26, а ниже любой сбой curl выдаётся за таймаут сети.
+    if [[ ! -f "$UPLOAD_FILE" || ! -r "$UPLOAD_FILE" ]]; then
+        echo "Error: file not found or not readable: $UPLOAD_FILE" >&2
+        exit 1
+    fi
+    # В .env лежат токены. Агент, исполняющий текст чужой карточки, не должен приложить их к ней
+    # одной командой.
+    if [[ "$(basename "$UPLOAD_FILE")" == ".env" || ( -n "$HUB_ENV_FILE" && "$UPLOAD_FILE" -ef "$HUB_ENV_FILE" ) ]]; then
+        echo "Error: refusing to upload a .env with tokens: $UPLOAD_FILE" >&2
+        exit 1
+    fi
+fi
+
 # Эндпоинт склеивается с базой как есть (${KAITEN_API}${ENDPOINT}), поэтому без ведущего
 # слэша получается ".../api/latestspaces" — Kaiten отвечает 401, и выглядит это как
 # «не хватает прав», хотя токен в порядке. Нормализуем, чтобы обе формы работали.
@@ -51,6 +75,21 @@ BODY="$3"
 KAITEN_ACCESS_LEVEL="${KAITEN_ACCESS_LEVEL:-read_write_archive}"
 
 METHOD_UPPER=$(echo "$METHOD" | tr '[:lower:]' '[:upper:]')
+
+if [[ -n "$UPLOAD_FILE" ]]; then
+    # С GET файл ушёл бы телом запроса и прошёл бы уровень read, а загрузка — это запись.
+    if [[ "$METHOD_UPPER" != "POST" ]]; then
+        echo "Error: --file works only with POST" >&2
+        exit 1
+    fi
+    # По числовому id карточки Kaiten тоже отвечает 200, но кладёт файл на старый маршрут
+    # с постоянной публичной ссылкой. По коду ответа ошибку не видно, поэтому режем до запроса.
+    legacy_upload_re='^/cards/[0-9]+([/?]|$)'
+    if [[ "$ENDPOINT" =~ $legacy_upload_re ]]; then
+        echo "Error: upload by numeric card id creates a public legacy file. Use /cards/<card_uid>/files (uid: ./kaiten.sh GET /cards/<id> | jq -r .uid)" >&2
+        exit 1
+    fi
+fi
 
 access_level_num() {
     case "$KAITEN_ACCESS_LEVEL" in
@@ -147,14 +186,22 @@ esac
 CURL_ARGS=(
     -s
     --connect-timeout 10
-    --max-time 30
     -X "$METHOD_UPPER"
     -H "Authorization: Bearer $KAITEN_TOKEN"
-    -H "Content-Type: application/json"
 )
 
-if [[ -n "$BODY" ]]; then
-    CURL_ARGS+=(-d "$BODY")
+if [[ -n "$UPLOAD_FILE" ]]; then
+    # Тип multipart с границей curl ставит сам — заголовок JSON его бы перебил. Время загрузки
+    # растёт с размером файла, поэтому потолок выше. Путь в кавычках: без них curl режет его
+    # по «;» и «,» как параметры поля.
+    _upload_path="${UPLOAD_FILE//\\/\\\\}"
+    CURL_ARGS+=(--max-time 300 -F "file=@\"${_upload_path//\"/\\\"}\"")
+    unset _upload_path
+else
+    CURL_ARGS+=(--max-time 30 -H "Content-Type: application/json")
+    if [[ -n "$BODY" ]]; then
+        CURL_ARGS+=(-d "$BODY")
+    fi
 fi
 
 # Клиентский троттлинг (opt-in через env KAITEN_RATE): пауза ПЕРЕД запросом. Дефолт — без

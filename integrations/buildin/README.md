@@ -51,14 +51,29 @@ JWT-токен живёт ~30 дней.
 ./integrations/buildin/scripts/buildin.sh GET /api/users/me
 ```
 
+### Как выглядят ошибки
+
+UI API отвечает HTTP 200 почти всегда, а настоящий статус кладёт в поле `code`
+тела. `buildin.sh` смотрит на оба: не-успешный `code` — это ошибка, скрипт
+падает ненулевым кодом и пишет причину в stderr.
+
+```
+$ ./integrations/buildin/scripts/buildin.sh GET /api/blocks/<несуществующий_id>
+Error: Buildin API code 3005: Document not found
+$ echo $?
+1
+```
+
+Ответы без поля `code` и не-JSON тела проходят как раньше.
+
 ## Использование
 
 Все команды принимают UUID или URL buildin.ai:
 
 ```bash
 # Обе формы эквивалентны:
-./integrations/buildin/scripts/buildin-pages.sh read 2a904afe-42e9-4ebd-a94e-f6fe0cbacf58
-./integrations/buildin/scripts/buildin-pages.sh read https://buildin.ai/2a904afe-42e9-4ebd-a94e-f6fe0cbacf58
+./integrations/buildin/scripts/buildin-pages.sh read <page_id>
+./integrations/buildin/scripts/buildin-pages.sh read https://buildin.ai/<space_id>/<page_id>
 ```
 
 ### Чтение и навигация
@@ -410,7 +425,7 @@ image-блок (`type: 14`, `data.ossName`).
 ./integrations/buildin/scripts/buildin-shadow.sh search "RFC"
 
 # Дерево из кеша (без API)
-./integrations/buildin/scripts/buildin-shadow.sh tree
+./integrations/buildin/scripts/buildin-shadow.sh tree <page_id>
 
 # Полный дамп для LLM-анализа (субагент может прочитать и понять структуру)
 ./integrations/buildin/scripts/buildin-shadow.sh dump
@@ -421,6 +436,8 @@ image-блок (`type: 14`, `data.ossName`).
 ```
 
 Поиск через `buildin-nav.sh search` автоматически проверяет shadow-индекс перед обращением к API.
+
+`tree` без аргумента берёт корень снаружи, в порядке: `BUILDIN_ROOT_PAGE_ID` (из `.env` или окружения), затем `buildin.root_page_id` в `team-config.json`. Если корень нигде не задан, команда печатает подсказку и выходит с ошибкой: раньше на её месте был ID страницы конкретной команды, из-за чего у всех остальных `tree` молча печатал пустое дерево.
 
 ## Известные страницы
 

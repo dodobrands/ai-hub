@@ -8,6 +8,8 @@
 #   update <page_id> <title> <summary> [parent_id] — добавить/обновить запись
 #   add-children <page_id> <child_ids>   — записать список children (JSON array)
 #   tree [page_id]                       — дерево из индекса (мгновенно, без API)
+#                                          без аргумента: BUILDIN_ROOT_PAGE_ID,
+#                                          иначе buildin.root_page_id из team-config.json
 #   dump                                 — вывести весь индекс для LLM-анализа
 #   stats                                — статистика индекса
 #   stale [days]                         — показать записи старше N дней (default: 30)
@@ -17,10 +19,46 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INDEX_FILE="$SCRIPT_DIR/../shadow-index.json"
 
-# Проверить наличие индекса
+# Корень overlay-репозитория (где лежит team-config.json) знает только
+# load-env.sh. Подключаем мягко, в отличие от сетевых скриптов: shadow-индекс
+# работает полностью локально и без токенов, поэтому отсутствие .env — не повод
+# отказывать в работе, максимум некому подсказать корень дерева.
+_hub_load_env_sh="$SCRIPT_DIR/../../hub-meta/scripts/load-env.sh"
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "$SCRIPT_DIR"/../../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+[[ -f "$_hub_load_env_sh" ]] || _hub_load_env_sh=$(ls "${CLAUDE_PLUGIN_ROOT:-/dev/null}"/../../hub-meta/*/scripts/load-env.sh 2>/dev/null | sort -V | tail -1)
+if [[ -f "$_hub_load_env_sh" ]]; then
+    # shellcheck source=../../hub-meta/scripts/load-env.sh
+    source "$_hub_load_env_sh"
+    hub_load_env "$SCRIPT_DIR" || true
+fi
+unset _hub_load_env_sh
+
+# Корень дерева — командная специфика, и generic-код его не знает: по
+# REVIEW_GUIDELINES она живёт в overlay потребителя. Порядок поиска:
+# аргумент команды → BUILDIN_ROOT_PAGE_ID из .env → team-config.json.
+# Читаем python3, а не jq: он и так обязателен для каждой команды этого
+# скрипта, а jq здесь не нужен нигде больше — тогда на машине без jq
+# настроенный корень молча переставал бы применяться.
+TEAM_CONFIG="${HUB_OVERLAY_ROOT:-}/team-config.json"
+if [[ -z "${BUILDIN_ROOT_PAGE_ID:-}" && -f "$TEAM_CONFIG" ]]; then
+    BUILDIN_ROOT_PAGE_ID=$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("buildin", {}).get("root_page_id", "") or "")
+except Exception:
+    pass
+' "$TEAM_CONFIG" 2>/dev/null || true)
+fi
+
+# Проверить наличие индекса. root_page_id собираем python3, а не подстановкой в
+# строку: значение приходит из конфига, и кавычка в нём порвала бы JSON.
 ensure_index() {
     if [[ ! -f "$INDEX_FILE" ]]; then
-        echo '{"meta":{"description":"Shadow index","root_page_id":"2a904afe-42e9-4ebd-a94e-f6fe0cbacf58"},"pages":{}}' > "$INDEX_FILE"
+        python3 -c '
+import json, sys
+json.dump({"meta": {"description": "Shadow index", "root_page_id": sys.argv[1]}, "pages": {}},
+          open(sys.argv[2], "w"), ensure_ascii=False)
+' "${BUILDIN_ROOT_PAGE_ID:-}" "$INDEX_FILE"
     fi
 }
 
@@ -155,7 +193,13 @@ print(f'✓ Added {len(children)} children to {page_id}')
         ;;
 
     tree)
-        ROOT="${1:-2a904afe-42e9-4ebd-a94e-f6fe0cbacf58}"
+        ROOT="${1:-${BUILDIN_ROOT_PAGE_ID:-}}"
+        [[ -z "$ROOT" ]] && {
+            echo "Usage: tree <page_id>" >&2
+            echo "       без аргумента корень берётся из BUILDIN_ROOT_PAGE_ID (.env или окружение)," >&2
+            echo "       иначе из buildin.root_page_id в team-config.json" >&2
+            exit 1
+        }
         ensure_index
         python3 -c "
 import json, sys
@@ -181,6 +225,11 @@ def print_tree(pid, depth=0, max_depth=10):
     if depth < max_depth:
         for cid in page.get('children', []):
             print_tree(cid, depth + 1, max_depth)
+
+if root not in pages:
+    sys.stderr.write('Error: корня %s нет в индексе\n' % root)
+    sys.stderr.write('       проверь buildin.root_page_id / BUILDIN_ROOT_PAGE_ID или отсканируй страницу\n')
+    sys.exit(1)
 
 print_tree(root)
 " "$ROOT" "$INDEX_FILE"
