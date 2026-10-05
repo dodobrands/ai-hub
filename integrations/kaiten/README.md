@@ -51,7 +51,16 @@ chmod +x integrations/kaiten/scripts/*.sh
 ./kaiten.sh POST /cards '{"title": "Задача", "board_id": 1, "column_id": 2}'
 ./kaiten.sh PATCH /cards/123 '{"column_id": 5}'
 ./kaiten.sh DELETE /cards/123
+./kaiten.sh POST /cards/<card_uid>/files --file ./report.html
 ```
+
+Файл уходит multipart-запросом: `--file <путь>` стоит на месте JSON-тела. Метод — только
+`POST`, файл — один за вызов. Путь — по `uid` карточки: с числовым id Kaiten ответил бы 200,
+но создал бы старый файл с публичной ссылкой, поэтому такой вызов `kaiten.sh` отклоняет до
+запроса. `.env` с токенами не загружается. Подробнее — [docs/KAITEN_API.md](./docs/KAITEN_API.md#card-files-файлы).
+
+Потолок времени загрузки — 5 минут. У Bash-инструмента Claude Code по умолчанию 2 минуты,
+поэтому большой файл из сессии агента загружай с увеличенным таймаутом вызова.
 
 ### Карточки (`kaiten-cards.sh`)
 
