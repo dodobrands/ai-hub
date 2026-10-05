@@ -3,8 +3,8 @@
 # Usage: ./buildin-pages.sh <command> [args...]
 #
 # Принимает page_id как UUID или URL:
-#   ./buildin-pages.sh read 2a904afe-42e9-4ebd-a94e-f6fe0cbacf58
-#   ./buildin-pages.sh read https://buildin.ai/241db73f.../2a904afe...
+#   ./buildin-pages.sh read <page_id>
+#   ./buildin-pages.sh read https://buildin.ai/<space_id>/<page_id>
 #
 # Commands:
 #   get <page_id>                          — получить страницу (JSON, все блоки)
@@ -29,7 +29,10 @@
 #                                                        (JPEG: размеры из SOF, EXIF Orientation не учитывается)
 #   delete-block <block_id> <parent_id>                — удалить блок
 
-set -e
+# pipefail обязателен вместе с JSON-отказом из buildin.sh: без него сбой клиента
+# в конвейере `buildin ... | python3` маскируется нулевым статусом питона,
+# который теперь честно разбирает тело ошибки и завершается успешно.
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -46,14 +49,28 @@ parse_id() {
     echo "${uuid:-$input}"
 }
 
-# Получить spaceId для страницы
+# Получить spaceId для страницы. Пустой ответ — отказ: без spaceId транзакция
+# уходит в никуда, а вызывающему это видно только по молча не применившейся
+# правке.
 get_space_id() {
     local PAGE_ID="$1"
-    buildin GET "/api/blocks/$PAGE_ID" | python3 -c "
+    local space_id
+    space_id=$(buildin GET "/api/blocks/$PAGE_ID" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 print(data.get('data', {}).get('spaceId', ''))
-" 2>/dev/null
+" 2>/dev/null)
+    [[ -z "$space_id" ]] && { echo "Error: cannot resolve spaceId for $PAGE_ID" >&2; exit 1; }
+    echo "$space_id"
+}
+
+# Получить uuid текущего пользователя — его проставляют в createdBy/updatedBy.
+# Пустой uuid молча испортил бы авторство у всего, что создаёт транзакция.
+get_user_id() {
+    local user_id
+    user_id=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+    [[ -z "$user_id" ]] && { echo "Error: cannot resolve current user id from /api/users/me" >&2; exit 1; }
+    echo "$user_id"
 }
 
 # Сгенерировать UUID v4
@@ -116,12 +133,11 @@ print(block.get('title', '(untitled)'))
         [[ -z "$PARENT_ID" || -z "$TITLE" ]] && { echo "Usage: create <parent_page_id|url> <title>" >&2; exit 1; }
 
         SPACE_ID=$(get_space_id "$PARENT_ID")
-        [[ -z "$SPACE_ID" ]] && { echo "Error: cannot determine spaceId for parent $PARENT_ID" >&2; exit 1; }
 
         PAGE_UUID=$(gen_uuid)
         BLOCK_UUID=$(gen_uuid)
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
-        USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+        USER_ID=$(get_user_id)
 
         OPS=$(python3 -c "
 import json, sys
@@ -226,7 +242,7 @@ print(json.dumps(ops))
 
         SPACE_ID=$(get_space_id "$PAGE_ID")
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
-        USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+        USER_ID=$(get_user_id)
 
         OPS=$(python3 -c "
 import json, sys
@@ -260,9 +276,10 @@ print(json.dumps(ops))
         # Get parent and space info
         BLOCK_INFO=$(buildin GET "/api/blocks/$PAGE_ID")
         SPACE_ID=$(echo "$BLOCK_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('spaceId',''))")
+        [[ -z "$SPACE_ID" ]] && { echo "Error: cannot resolve spaceId for $PAGE_ID" >&2; exit 1; }
         PARENT_ID=$(echo "$BLOCK_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('parentId',''))")
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
-        USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+        USER_ID=$(get_user_id)
 
         OPS=$(python3 -c "
 import json, sys
@@ -565,7 +582,7 @@ render(page.get('subNodes', []))
 
         SPACE_ID=$(get_space_id "$PAGE_ID")
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
-        USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+        USER_ID=$(get_user_id)
 
         OPS=$(python3 "$SCRIPT_DIR/buildin-blocks.py" "$PAGE_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON")
 
@@ -580,7 +597,7 @@ render(page.get('subNodes', []))
 
         SPACE_ID=$(get_space_id "$PAGE_ID")
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
-        USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+        USER_ID=$(get_user_id)
 
         OPS=$(python3 "$SCRIPT_DIR/buildin-blocks.py" "$PAGE_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON" "$AFTER_BLOCK_ID")
 
@@ -613,7 +630,7 @@ print(sub[i - 1] if i > 0 else '')
         else
             SPACE_ID=$(get_space_id "$PAGE_ID")
             NOW=$(python3 -c "import time; print(int(time.time()*1000))")
-            USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+            USER_ID=$(get_user_id)
             OPS=$(python3 "$SCRIPT_DIR/buildin-blocks.py" "$PAGE_ID" "$SPACE_ID" "$NOW" "$USER_ID" "$BLOCKS_JSON" "" "$BEFORE_BLOCK_ID")
             transaction "$SPACE_ID" "$OPS"
         fi
@@ -692,7 +709,6 @@ print(json.dumps({
 " "$FILE") || exit 1
 
         SPACE_ID=$(get_space_id "$PAGE_ID")
-        [[ -z "$SPACE_ID" ]] && { echo "Error: cannot resolve spaceId for $PAGE_ID" >&2; exit 1; }
 
         # Дедуп как в родном клиенте: перед аплоадом ищем файл по sha256+size и
         # переиспользуем существующий ossName. Проверка оппортунистическая — в наших
@@ -762,7 +778,7 @@ print(json.dumps([{'type': 14, 'data': data}]))
 
         SPACE_ID=$(get_space_id "$BLOCK_ID")
         NOW=$(python3 -c "import time; print(int(time.time()*1000))")
-        USER_ID=$(buildin GET "/api/users/me" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('uuid',''))")
+        USER_ID=$(get_user_id)
 
         OPS=$(python3 -c "
 import json, sys

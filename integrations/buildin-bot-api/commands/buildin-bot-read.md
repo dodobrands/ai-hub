@@ -24,7 +24,7 @@ If token is missing, ask the user to:
 
 The user provides `$ARGUMENTS` — it can be:
 - **URL** like `https://buildin.ai/.../page-uuid` → extract UUID
-- **UUID** like `2a904afe-42e9-4ebd-a94e-f6fe0cbacf58` → use directly
+- **UUID** like `<page_id>` → use directly
 - **Search query** like `"RFC template"` → ⚠️ read the warning below first
 
 > **⚠️ The Bot API search endpoint `POST /v1/search` is broken — do NOT search via this command.**
