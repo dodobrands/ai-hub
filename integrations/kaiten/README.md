@@ -83,6 +83,11 @@ chmod +x integrations/kaiten/scripts/*.sh
 # Назначить ответственного
 ./kaiten-cards.sh assign <card_id> <user_id>
 
+# Файлы: прикрепить, список, скачать
+./kaiten-cards.sh attach <card_id> ./report.html
+./kaiten-cards.sh files <card_id>
+./kaiten-cards.sh download <card_id> <file_id> [out_path]
+
 # Чек-лист
 ./kaiten-cards.sh checklist <card_id> "Название чек-листа"
 ./kaiten-cards.sh check-item <card_id> <checklist_id> "Пункт"
