@@ -38,6 +38,11 @@ Commands:
   tag <card_id> <tag_id>             - Добавить тег
   tags <card_id>                     - Получить теги
 
+  attach <card_id> <path>            - Прикрепить файл (файл с ограниченным доступом,
+                                         загружается по uid карточки)
+  files <card_id>                    - Файлы карточки: id, имя, тип, ограниченный ли доступ
+  download <card_id> <file_id> [out] - Скачать файл (по умолчанию — в ./<имя файла>)
+
   blockers <card_id>                 - Получить блокировки карточки
   block <card_id> <reason>           - Заблокировать (текстовая причина)
   block <card_id> --card <blocker_card_id> [reason]
@@ -69,6 +74,9 @@ Examples:
   ./kaiten-cards.sh create 123 456 "Новая задача" "Описание" "5 SP" 42
   ./kaiten-cards.sh move 789 101
   ./kaiten-cards.sh comment 789 "Готово!"
+  ./kaiten-cards.sh attach 789 ./report.html
+  ./kaiten-cards.sh files 789
+  ./kaiten-cards.sh download 789 <file_id> /tmp/report.html
   ./kaiten-cards.sh blockers 789
   ./kaiten-cards.sh block 789 "Ждём макеты"
   ./kaiten-cards.sh block 789 --card 456
@@ -212,6 +220,42 @@ case "${1:-help}" in
         ;;
     tags)
         kaiten GET "/cards/$2/tags"
+        ;;
+    attach)
+        # Kaiten keeps new uploads only under the card uid; kaiten.sh rejects a numeric id
+        # because Kaiten would answer 200 and silently create a public legacy file.
+        [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 attach <card_id> <path>" >&2; exit 1; }
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: card_id must be numeric, got '$2'" >&2; exit 1; }
+        card_uid=$(kaiten GET "/cards/$2" | jq -r '.uid // empty')
+        [[ -n "$card_uid" ]] || { echo "Error: card $2 has no uid" >&2; exit 1; }
+        kaiten POST "/cards/$card_uid/files" --file "$3"
+        ;;
+    files)
+        [[ -z "$2" ]] && { echo "Usage: $0 files <card_id>" >&2; exit 1; }
+        # url is left out on purpose: a legacy file url is public, a restricted one expires in seconds.
+        kaiten GET "/cards/$2" | jq '[(.files // [])[] | select(.deleted != true)
+            | {id, name, type, size: (.size | tonumber? // .size), restricted: (.type == 11), created}]'
+        ;;
+    download)
+        [[ -z "$2" || -z "$3" ]] && { echo "Usage: $0 download <card_id> <file_id> [out_path]" >&2; exit 1; }
+        [[ "$2" =~ ^[0-9]+$ ]] || { echo "Error: card_id must be numeric, got '$2'" >&2; exit 1; }
+        card=$(kaiten GET "/cards/$2")
+        file=$(jq -c --arg id "$3" '(.files // [])[] | select((.id | tostring) == $id)' <<< "$card")
+        [[ -n "$file" ]] || { echo "Error: file $3 not found on card $2" >&2; exit 1; }
+        out="${4:-./$(jq -r '.name' <<< "$file")}"
+        # A restricted file (type 11, uuid id) has no permanent url: the signed link lives seconds,
+        # so it is requested right before the download. A legacy file keeps its public url.
+        if [[ "$(jq -r '.type' <<< "$file")" == "11" ]]; then
+            card_uid=$(jq -r '.uid' <<< "$card")
+            url=$(kaiten GET "/cards/$card_uid/files/$3" | jq -r '.url // empty')
+        else
+            url=$(jq -r '.url // empty' <<< "$file")
+        fi
+        [[ -n "$url" ]] || { echo "Error: Kaiten returned no download url for file $3" >&2; exit 1; }
+        # The token stays with Kaiten: the signed link must not receive Authorization.
+        curl -sSf --connect-timeout 10 --max-time 300 -o "$out" "$url" \
+            || { echo "Error: download of file $3 failed" >&2; exit 1; }
+        echo "$out"
         ;;
     blockers)
         [[ -z "$2" ]] && { echo "Usage: $0 blockers <card_id>" >&2; exit 1; }
