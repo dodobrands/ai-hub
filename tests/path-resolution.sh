@@ -9,6 +9,10 @@
 #   а для скиллов (активируются из произвольного cwd) — ещё symlink-в-~/.claude
 #   и Copilot _direct.
 #
+# Команды проверяются в каждом доступном шелле: агент выполняет сниппет в шелле
+# пользователя, и поведение расходится — в zsh несовпавший glob обрывает всю
+# подстановку, в bash он просто пропускается.
+#
 # Покрытие: buildin, kaiten, time (команды + skill).
 # Любой провал REQUIRED → exit≠0 → CI красный.
 set -u
@@ -30,12 +34,22 @@ extract_skill_resolver(){ # $1=md  (резолвер skill-time: _t=… → TIME
   sed -n '/^_t=""/,/^TIME_MESSAGES=/p' "$1"
 }
 
+# ---- шеллы ------------------------------------------------------------------
+# Сниппет выполняет агент в шелле пользователя, а не в bash: на macOS это zsh.
+# Разница не косметическая — в zsh несовпавший glob фатален для всей подстановки,
+# поэтому цепочка кандидатов обрывается на первом непопавшем шаблоне и до
+# следующих не доходит. Гоняем каждый сценарий по всем доступным шеллам.
+SHELLS=(bash)
+command -v zsh >/dev/null 2>&1 && SHELLS+=(zsh) || echo "  SKIP  zsh не установлен — ветка zsh не проверена"
+
 # ---- прогон одного сценария -------------------------------------------------
-run_cmd(){ # snippet cwd root → каталог скриптов
-  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" bash -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
+# HOME подменяется всегда: резолвер умеет искать кеш marketplace-установки в
+# ~/.claude/plugins/cache, и без подмены реальный кеш раннера давал бы ложный PASS.
+run_cmd(){ # snippet cwd root shell home → каталог скриптов
+  ( cd "$2" && HOME="$5" CLAUDE_PLUGIN_ROOT="$3" "$4" -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
 }
-run_skill(){ # snippet cwd root home → полный путь скрипта
-  ( cd "$2" && HOME="$4" CLAUDE_PLUGIN_ROOT="$3" bash -c "set -u; $1"$'\n''printf %s "$TIME_MESSAGES"' )
+run_skill(){ # snippet cwd root home shell → полный путь скрипта
+  ( cd "$2" && HOME="$4" CLAUDE_PLUGIN_ROOT="$3" "$5" -c "set -u; $1"$'\n''printf %s "$TIME_MESSAGES"' )
 }
 
 pass(){ printf '  PASS  %s\n' "$1"; }
@@ -45,26 +59,35 @@ fail(){ printf '  FAIL  %s\n' "$1"; FAILS=$((FAILS+1)); }
 # 1) КОМАНДЫ: резолвер из каждого командного .md по cwd-сценариям
 # ============================================================================
 echo "== Команды (standalone / overlay / marketplace) =="
-{ echo "### Резолв пути — команды"; echo; echo "| Интеграция | Файл | Сценарий | Итог |"; echo "|---|---|---|---|"; } >> "$SUM"
+{ echo "### Резолв пути — команды"; echo; echo "| Интеграция | Файл | Сценарий | Шелл | Итог |"; echo "|---|---|---|---|---|"; } >> "$SUM"
 
 for INT in buildin kaiten time; do
   M="${MARK[$INT]}"
   ST="$TMP/$INT/standalone"
   OV="$TMP/$INT/overlay"
+  DP="$TMP/$INT/deep"
   CA="$TMP/$INT/cache/$INT/9.9.9"
   UN="$TMP/$INT/unrelated/proj"
   mk "$ST/integrations/$INT/scripts/$M"
   mk "$OV/integrations/team-overlay/integrations/$INT/scripts/$M"
+  # overlay вендорит хаб не в integrations/, а глубже — например в tools/
+  mk "$DP/tools/hub/integrations/$INT/scripts/$M"
   mk "$CA/scripts/$M"
-  mkdir -p "$UN"
+  HC="$TMP/$INT/home-clean"
+  # marketplace-установка на месте, но CLAUDE_PLUGIN_ROOT не экспортирован
+  HP="$TMP/$INT/home-plugin"
+  mk "$HP/.claude/plugins/cache/ai-hub/$INT/9.9.9/scripts/$M"
+  mkdir -p "$UN" "$HC"
 
-  # name|cwd|root  (все REQUIRED)
+  # name|cwd|root|home  (все REQUIRED)
   SCN=(
-    "standalone (var нет)        |$ST|"
-    "standalone, /plugin         |$ST|$ST/integrations/$INT"
-    "overlay-subtree (var нет)   |$OV|"
-    "overlay-subtree, /plugin    |$OV|$OV/integrations/team-overlay/integrations/$INT"
-    "marketplace (кеш плагина)   |$UN|$CA"
+    "standalone (var нет)        |$ST||$HC"
+    "standalone, /plugin         |$ST|$ST/integrations/$INT|$HC"
+    "overlay-subtree (var нет)   |$OV||$HC"
+    "overlay-subtree, /plugin    |$OV|$OV/integrations/team-overlay/integrations/$INT|$HC"
+    "overlay вне integrations/   |$DP||$HC"
+    "marketplace (кеш плагина)   |$UN|$CA|$HC"
+    "плагин есть, var нет        |$UN||$HP"
   )
 
   for md in integrations/$INT/commands/*.md; do
@@ -73,14 +96,16 @@ for INT in buildin kaiten time; do
     snip="$(extract_cmd_resolver "$md" "$INT")"
     base="$(basename "$md")"
     for row in "${SCN[@]}"; do
-      IFS='|' read -r name cwd root <<< "$row"; name="$(echo "$name" | sed 's/ *$//')"
-      dir="$(run_cmd "$snip" "$cwd" "$root")"
-      if ( cd "$cwd" && [ -f "$dir/$M" ] ); then
-        pass "$INT/$base — $name"; r=PASS
-      else
-        fail "$INT/$base — $name → [$dir]"; r=FAIL
-      fi
-      echo "| $INT | $base | $name | $r |" >> "$SUM"
+      IFS='|' read -r name cwd root home <<< "$row"; name="$(echo "$name" | sed 's/ *$//')"
+      for sh in "${SHELLS[@]}"; do
+        dir="$(run_cmd "$snip" "$cwd" "$root" "$sh" "$home" 2>/dev/null)"
+        if ( cd "$cwd" && [ -f "$dir/$M" ] ); then
+          pass "$INT/$base — $name [$sh]"; r=PASS
+        else
+          fail "$INT/$base — $name [$sh] → [$dir]"; r=FAIL
+        fi
+        echo "| $INT | $base | $name | $sh | $r |" >> "$SUM"
+      done
     done
   done
 done
@@ -90,7 +115,7 @@ done
 # ============================================================================
 echo
 echo "== Skill time-chat (произвольный cwd: git / symlink / copilot / plugin) =="
-{ echo; echo "### Резолв пути — skill time-chat"; echo; echo "| Сценарий | Итог |"; echo "|---|---|"; } >> "$SUM"
+{ echo; echo "### Резолв пути — skill time-chat"; echo; echo "| Сценарий | Шелл | Итог |"; echo "|---|---|---|"; } >> "$SUM"
 
 SKILL_MD="integrations/time/skills/time-chat/SKILL.md"
 if [ -f "$SKILL_MD" ] && grep -q '^_t=""' "$SKILL_MD"; then
@@ -104,6 +129,8 @@ if [ -f "$SKILL_MD" ] && grep -q '^_t=""' "$SKILL_MD"; then
   H_CLEAN="$TMP/skill/home-clean"; mkdir -p "$H_CLEAN/.claude/skills"
   H_SYM="$TMP/skill/home-sym"; mkdir -p "$H_SYM/.claude/skills"; ln -s "$S_OV/skills/time-chat" "$H_SYM/.claude/skills/any-name"
   H_COP="$TMP/skill/home-copilot"; mk "$H_COP/.copilot/installed-plugins/_direct/time/scripts/$M"
+  # marketplace-установка на месте, но CLAUDE_PLUGIN_ROOT не экспортирован
+  H_PLG="$TMP/skill/home-plugin"; mk "$H_PLG/.claude/plugins/cache/ai-hub/time/9.9.9/scripts/$M"
 
   # name|cwd|root|home
   S_SCN=(
@@ -113,13 +140,16 @@ if [ -f "$SKILL_MD" ] && grep -q '^_t=""' "$SKILL_MD"; then
     "overlay-subtree, /plugin    |$S_OV|$S_OV|$H_CLEAN"
     "marketplace (кеш плагина)   |$S_UN|$S_CA|$H_CLEAN"
     "Copilot _direct             |$S_UN|$|$H_COP"
+    "плагин есть, var нет        |$S_UN|$|$H_PLG"
   )
   for row in "${S_SCN[@]}"; do
     IFS='|' read -r name cwd root home <<< "$row"
     name="$(echo "$name" | sed 's/ *$//')"; [ "$root" = '$' ] && root=""
-    got="$(run_skill "$SNIP" "$cwd" "$root" "$home")"
-    if [ -f "$got" ]; then pass "skill — $name"; r=PASS; else fail "skill — $name → [$got]"; r=FAIL; fi
-    echo "| $name | $r |" >> "$SUM"
+    for sh in "${SHELLS[@]}"; do
+      got="$(run_skill "$SNIP" "$cwd" "$root" "$home" "$sh" 2>/dev/null)"
+      if [ -f "$got" ]; then pass "skill — $name [$sh]"; r=PASS; else fail "skill — $name [$sh] → [$got]"; r=FAIL; fi
+      echo "| $name | $sh | $r |" >> "$SUM"
+    done
   done
 else
   fail "skill SKILL.md не найден или без резолвера (_t)"

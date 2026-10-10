@@ -17,8 +17,15 @@ allowed-tools: ["Bash", "Read", "Glob", "Grep", "AskUserQuestion"]
 переменная между ними не сохраняется — повтори её в начале нужного блока.
 
 ```bash
-# resolve-buildin-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
-BUILDIN_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/buildin/scripts "$PWD"/integrations/buildin/scripts 2>/dev/null | head -1)
+# resolve-buildin-dir:start — плагин-кеш, иначе поиск по форме пути от корня репозитория,
+# иначе кеш marketplace-установки. Без glob-ов: в zsh несовпавший шаблон обрывает всю
+# подстановку, и до следующих кандидатов дело не доходит (см. tests/path-resolution.sh).
+BUILDIN_SCRIPTS=""
+[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "$CLAUDE_PLUGIN_ROOT/scripts/buildin-pages.sh" ] && BUILDIN_SCRIPTS="$CLAUDE_PLUGIN_ROOT/scripts"
+[ -n "$BUILDIN_SCRIPTS" ] || BUILDIN_SCRIPTS=$(find "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" -maxdepth 6 -type d -path '*/integrations/buildin/scripts' 2>/dev/null | sort | head -1)
+# CLAUDE_PLUGIN_ROOT экспортируется не всегда: при запуске из постороннего репозитория
+# его нет, и поиск от корня репо ничего не найдёт — берём кеш установленного плагина.
+[ -n "$BUILDIN_SCRIPTS" ] || BUILDIN_SCRIPTS=$(find "$HOME/.claude/plugins/cache" -maxdepth 4 -type d -path '*/buildin/*/scripts' 2>/dev/null | sort -V | tail -1)
 # resolve-buildin-dir:end
 ```
 
