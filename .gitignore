@@ -55,3 +55,6 @@ integrations/buildin/shadow-index.json
 # Побочный продукт запуска python-скриптов из каталога интеграции.
 __pycache__/
 *.pyc
+
+# Локальный стоп-лист обезличивания для hub-preflight (реальные имена и домены)
+.deident-denylist
