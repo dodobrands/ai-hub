@@ -91,7 +91,7 @@ bash integrations/hub-meta/scripts/setup.sh next
 | `KAITEN_TOKEN` | Kaiten → Настройки профиля → API/Интеграции → Создать токен |
 | `BUILDIN_UI_TOKEN` | `/ai-hub:buildin-login` — browser SSO |
 | `TIME_TOKEN` | `/ai-hub:time-login` — browser SSO. ⚠️ Нужен только для deprecated-плагина `time`; у `dodo-time` авторизация через OAuth, переменная не нужна |
-| `GENIE_TOKEN` | Опционально, получить у админа данных |
+| `GENIE_SPACE_ID`, `GENIE_PROFILE`, `GENIE_HOST` | Опционально, для `genie`. Токен не нужен: OAuth через `databricks auth login --host <workspace-url> --profile <profile>`, см. [integrations/genie](integrations/genie/README.md) |
 | `TESTOPS_URL`, `TESTOPS_TOKEN` | Allure TestOps → Settings → API Tokens → Generate Token |
 
 Скиллы без токенов (ai-test, rpa-analyze, retro, code-review и т.д.) работают сразу.

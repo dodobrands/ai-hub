@@ -49,8 +49,8 @@ STUB
     chmod +x "$SANDBOX/bin/databricks" "$SANDBOX/bin/curl"
     PATH="$SANDBOX/bin:$PATH"
     export PATH
-    # Секреты и профиль из окружения разработчика не должны просочиться в тест.
-    unset GENIE_TOKEN GENIE_HOST GENIE_PROFILE GENIE_SPACE_ID DATABRICKS_CONFIG_PROFILE
+    # Конфиг и профиль из окружения разработчика не должны просочиться в тест.
+    unset GENIE_HOST GENIE_PROFILE GENIE_SPACE_ID DATABRICKS_CONFIG_PROFILE
 
     GENIE="$HUB/integrations/genie/scripts/genie.sh"
 }

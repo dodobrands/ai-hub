@@ -7,24 +7,31 @@
 Используется официальный Genie Conversation API:
 
 ```
-POST https://${GENIE_HOST}/api/2.0/genie/spaces/{space_id}/start-conversation
-GET  https://${GENIE_HOST}/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}
+POST <workspace-url>/api/2.0/genie/spaces/{space_id}/start-conversation
+GET  <workspace-url>/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}
 ```
 
 **Space ID:** `${GENIE_SPACE_ID}` (configure in `.env`)
 
 ## Авторизация
 
+OAuth (U2M) через databricks CLI — PAT не нужен:
+
+```bash
+databricks auth login --host https://<workspace>.azuredatabricks.net --profile <profile>
 ```
-Authorization: Bearer {GENIE_TOKEN}
-Content-Type: application/json
-```
+
+CLI хранит токен у себя и обновляет его сам. Все вызовы ниже идут через CLI с `--profile <profile>`,
+поэтому заголовок `Authorization` руками не собирается.
 
 ## Как это работает
 
-1. **Start Conversation** — отправляем вопрос, получаем `conversation_id` и `message_id`
-2. **Poll for Result** — опрашиваем API пока `status` не станет `COMPLETED`
-3. **Parse Response** — извлекаем текст, SQL, таблицы, suggested questions
+`genie.sh` вызывает `databricks genie start-conversation`, который делает оба шага сам:
+
+1. **Start Conversation** — отправляет вопрос, получает `conversation_id` и `message_id`
+2. **Poll for Result** — опрашивает сообщение пока `status` не станет `COMPLETED` (на `FAILED`/`CANCELLED` — ошибка)
+
+После этого `genie.sh` извлекает из сообщения текст, SQL, таблицы и suggested questions.
 
 ## CLI Usage
 
@@ -65,13 +72,18 @@ WHERE `SaleDate` = current_date - 1
 ### Start Conversation
 
 ```bash
-curl -X POST "https://${GENIE_HOST}/api/2.0/genie/spaces/${SPACE_ID}/start-conversation" \
-  -H "Authorization: Bearer $GENIE_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"content": "your natural language question"}'
+# Сразу ждать ответа (как делает genie.sh) — вернёт готовое сообщение, см. «Формат ответа»
+databricks genie start-conversation --profile <profile> -o json "$GENIE_SPACE_ID" "your natural language question"
+
+# Без ожидания — вернёт только идентификаторы
+databricks genie start-conversation --profile <profile> -o json --no-wait "$GENIE_SPACE_ID" "your natural language question"
+
+# То же сырым REST-вызовом (авторизацию подставляет CLI)
+databricks api post --profile <profile> "/api/2.0/genie/spaces/$GENIE_SPACE_ID/start-conversation" \
+  --json '{"content": "your natural language question"}'
 ```
 
-Response:
+Response (`--no-wait` и REST):
 ```json
 {
   "conversation_id": "01f0f78e46ff12bab6e729b1a82c2942",
@@ -86,8 +98,7 @@ Response:
 ### Poll for Result
 
 ```bash
-curl -X GET "https://${GENIE_HOST}/api/2.0/genie/spaces/${SPACE_ID}/conversations/${CONVERSATION_ID}/messages/${MESSAGE_ID}" \
-  -H "Authorization: Bearer $GENIE_TOKEN"
+databricks genie get-message --profile <profile> -o json "$GENIE_SPACE_ID" "$CONVERSATION_ID" "$MESSAGE_ID"
 ```
 
 ## Формат ответа
@@ -165,7 +176,7 @@ Genie использует следующие таблицы из Unity Catalog:
 
 | HTTP Code | Описание |
 |-----------|----------|
-| 401 | Неверный или отсутствующий токен |
+| 401 | Нет действующего OAuth-логина: `databricks auth login --host <workspace-url> --profile <profile>` |
 | 404 | Space/Conversation/Message не найден |
 | 429 | Превышен лимит запросов |
 | 500 | Внутренняя ошибка сервиса |

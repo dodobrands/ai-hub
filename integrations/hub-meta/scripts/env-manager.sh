@@ -26,7 +26,7 @@ ENV_LOCAL_FILE="$WRITE_ROOT/.env.local"
 COMPANY_CONFIG=(KAITEN_DOMAIN TIME_BASE_URL BUILDIN_SPACE_ID)
 COMPANY_OPTIONAL=(GENIE_HOST GENIE_SPACE_ID)
 PERSONAL_TOKENS=(KAITEN_TOKEN BUILDIN_UI_TOKEN TIME_TOKEN)
-PERSONAL_OPTIONAL=(GENIE_TOKEN TIME_BOT_TOKEN)
+PERSONAL_OPTIONAL=(GENIE_PROFILE TIME_BOT_TOKEN)
 
 # Re-load env (subcommands may have written to it). Delegates to the
 # shared helper so secret stripping rules stay consistent.
@@ -118,7 +118,7 @@ cmd_has() {
 
 # Non-secret whitelist: only these keys are safe to print.
 # Tokens and anything sensitive must NEVER be printed.
-NONSECRET_WHITELIST=(KAITEN_DOMAIN TIME_BASE_URL BUILDIN_SPACE_ID GENIE_HOST GENIE_SPACE_ID)
+NONSECRET_WHITELIST=(KAITEN_DOMAIN TIME_BASE_URL BUILDIN_SPACE_ID GENIE_HOST GENIE_SPACE_ID GENIE_PROFILE)
 
 cmd_get() {
     local key="$1"
