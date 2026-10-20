@@ -63,7 +63,36 @@ source "$SCRIPT_DIR/genie-config.sh"
 # stderr CLI нужен целиком, чтобы понять причину отказа: подсказка про логин при таймауте
 # или 403 отправила бы агента перелогиниваться, а логин делает только человек в браузере.
 CLI_ERR=$(mktemp)
-trap 'rm -f "$CLI_ERR"' EXIT
+GENIE_LOCK=""
+trap 'rm -f "$CLI_ERR"; [[ -z "$GENIE_LOCK" ]] || rmdir "$GENIE_LOCK" 2>/dev/null' EXIT
+
+# Параллельные вызовы (волна агентов discovery) обновляли бы истёкший access token одновременно.
+# Если в аккаунте Databricks включены single-use refresh tokens, выигрывает один, остальные
+# получают «refresh token is invalid» и требуют перелогина через браузер. Поэтому токен
+# прогреваем под блокировкой: обновится он один раз, остальные возьмут свежий (живёт час,
+# вопрос — минуты). Ошибка прогрева не фатальна: для профилей не на U2M `auth token` не
+# работает, а настоящий отказ авторизации покажет сам запрос.
+genie_warm_token() {
+    local key lock waited=0
+    key=$(printf '%s' "${GENIE_PROFILE:-${GENIE_HOST:-default}}" | tr -c 'A-Za-z0-9._-' '_')
+    lock="${TMPDIR:-/tmp}/genie-auth-$key.lock"
+    until mkdir "$lock" 2>/dev/null; do
+        # Прогрев держит блокировку не дольше своего таймаута (20 с); дольше её держит только
+        # убитый процесс. GENIE_LOCK_WAIT_SECONDS укорачивает ожидание в тестах.
+        if (( waited >= ${GENIE_LOCK_WAIT_SECONDS:-30} )); then
+            rmdir "$lock" 2>/dev/null || true
+            waited=0
+            continue
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    GENIE_LOCK="$lock"
+    databricks auth token "${GENIE_CLI_ARGS[@]}" --timeout 20s >/dev/null 2>&1 || true
+    rmdir "$lock" 2>/dev/null || true
+    GENIE_LOCK=""
+}
+genie_warm_token
 
 # CLI сам опрашивает сообщение до COMPLETED и падает на FAILED/CANCELLED. Его таймаут по
 # умолчанию — 20 минут; агенту столько висеть незачем.
