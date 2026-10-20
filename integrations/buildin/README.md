@@ -30,6 +30,8 @@ integrations/buildin/
 
 ## Быстрый старт
 
+> Нужен плагин `hub-meta`: скрипты берут из него загрузчик `.env` (`hub-meta/scripts/load-env.sh`). При установке плагином Claude Code ставит его сам — он объявлен в `dependencies` в `plugin.json`; в клоне и subtree он и так лежит рядом.
+
 ### 1. Логин
 
 Используй скилл `/ai-hub:buildin-login` — он откроет Buildin через Chrome DevTools MCP, выполнит Google SSO и сохранит JWT-токен в `.env` как `BUILDIN_UI_TOKEN`.
