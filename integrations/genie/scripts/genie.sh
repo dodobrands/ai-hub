@@ -35,7 +35,8 @@ while [[ $# -gt 0 ]]; do
             echo "  ./genie.sh --no-sql \"вопрос\"  # скрыть SQL детали"
             echo ""
             echo "Auth: databricks auth login --host <workspace-url> --profile <profile>"
-            echo "Config (.env): GENIE_SPACE_ID, GENIE_PROFILE, GENIE_HOST"
+            echo "Config (.env): GENIE_SPACE_ID, GENIE_PROFILE or GENIE_HOST"
+            echo "Exit codes: 0 ok, 1 error, 2 login required (the user runs it, it opens a browser)"
             echo ""
             echo "Examples:"
             echo "  ./genie.sh \"how many orders were there yesterday?\""
@@ -59,14 +60,29 @@ fi
 # Конфиг — после разбора аргументов, чтобы --help работал без CLI и .env.
 source "$SCRIPT_DIR/genie-config.sh"
 
+# stderr CLI нужен целиком, чтобы понять причину отказа: подсказка про логин при таймауте
+# или 403 отправила бы агента перелогиниваться, а логин делает только человек в браузере.
+CLI_ERR=$(mktemp)
+trap 'rm -f "$CLI_ERR"' EXIT
+
 # CLI сам опрашивает сообщение до COMPLETED и падает на FAILED/CANCELLED. Его таймаут по
 # умолчанию — 20 минут; агенту столько висеть незачем.
 # `--` — чтобы вопрос, начинающийся с дефиса, не разобрался как флаг CLI.
-if ! RESPONSE=$(databricks genie start-conversation "${GENIE_CLI_ARGS[@]}" --timeout 5m -- "$GENIE_SPACE_ID" "$QUERY"); then
-    echo "Error: Genie request failed (see databricks CLI error above). If it is an auth error, log in again:" >&2
-    genie_login_hint
+if ! RESPONSE=$(databricks genie start-conversation "${GENIE_CLI_ARGS[@]}" --timeout 5m -- "$GENIE_SPACE_ID" "$QUERY" 2>"$CLI_ERR"); then
+    cat "$CLI_ERR" >&2
+    # Тексты отказов авторизации CLI v1.13.0: нет кредов, протух refresh token, нет профиля.
+    if grep -qiE 'cannot configure default credentials|refresh token is invalid|invalid_grant|invalid access token|databricks auth login|has no .* profile configured' "$CLI_ERR"; then
+        genie_login_hint
+        exit 2
+    fi
+    if grep -qE 'unknown (command|flag)' "$CLI_ERR"; then
+        echo "Error: this databricks CLI has no 'genie start-conversation --timeout'. Update databricks CLI (tested on v1.13.0): https://docs.databricks.com/aws/en/dev-tools/cli/install" >&2
+        exit 1
+    fi
+    echo "Error: Genie request failed, see the databricks CLI error above" >&2
     exit 1
 fi
+cat "$CLI_ERR" >&2
 
 # Raw output mode
 if [ "$RAW_OUTPUT" = true ]; then

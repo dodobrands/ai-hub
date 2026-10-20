@@ -4,6 +4,8 @@ CLI инструменты для интеграции LLM агентов с Dat
 
 Авторизация — OAuth через [databricks CLI](https://docs.databricks.com/aws/en/dev-tools/cli/install): токен хранит и обновляет сам CLI, в `.env` и в скрипты он не попадает. Personal Access Token (PAT) не нужен.
 
+Зависимости: databricks CLI (проверено на v1.13.0; нужна группа команд `genie`), `python3` и плагин `hub-meta` — из него берётся загрузчик `.env` (`hub-meta/scripts/load-env.sh`).
+
 ## Структура
 
 ```
@@ -14,7 +16,8 @@ CLI инструменты для интеграции LLM агентов с Dat
 │   ├── genie-config.sh      # Конфигурация
 │   └── genie.sh             # CLI для запросов данных
 └── tests/
-    └── genie.bats           # Тесты genie.sh (стаб databricks CLI, без сети)
+    ├── genie.bats           # Тесты genie.sh (стаб databricks CLI, без сети)
+    └── fixtures/            # Обезличенный реальный вывод CLI
 ```
 
 ## Быстрый старт
@@ -33,16 +36,31 @@ databricks auth profiles                       # профиль должен б�
 databricks genie list-spaces --profile <profile>   # доступные Genie space и их space_id
 ```
 
+Сам токен (`databricks auth token`) в терминал не выводите — он нужен только внутри пайпа, см. [MCP_INTEGRATION.md](./MCP_INTEGRATION.md).
+
 ### 2. Настройка окружения
 
 ```bash
 # Добавьте в .env (корень репозитория или overlay-репозитория):
-GENIE_SPACE_ID=<space_id>                        # из list-spaces
-GENIE_PROFILE=<profile>                          # профиль из шага 1; пусто — профиль DEFAULT
-GENIE_HOST=https://<workspace>.azuredatabricks.net   # опционально: только для подсказки с командой логина
+GENIE_SPACE_ID=<space_id>                            # из list-spaces
+GENIE_HOST=https://<workspace>.azuredatabricks.net   # workspace; общий для команды
+GENIE_PROFILE=<profile>                              # опционально: профиль CLI, важнее GENIE_HOST
 ```
 
+Как выбирается workspace:
+
+| `GENIE_PROFILE` | `GENIE_HOST` | Куда идёт запрос |
+|---|---|---|
+| задан | любой | профиль `GENIE_PROFILE` (хост берётся из него) |
+| пусто | задан | профиль с этим хостом — CLI находит его сам; если таких профилей несколько, задайте `GENIE_PROFILE` |
+| пусто | пусто | профиль CLI по умолчанию (`DATABRICKS_CONFIG_PROFILE`, `default_profile` или `DEFAULT` в `~/.databrickscfg`) |
+
 Ни одна из переменных не секретная.
+
+### Переход с genie 1.x
+
+1. Удалите `GENIE_TOKEN` из `.env` и отзовите этот PAT в Databricks (User Settings → Developer → Access tokens). Пока переменная в `.env`, `genie.sh` предупреждает о ней.
+2. Залогиньтесь: `databricks auth login --host $GENIE_HOST`. Если `GENIE_HOST` уже есть в `.env`, больше ничего настраивать не нужно.
 
 ### 3. Примеры использования
 
@@ -113,17 +131,25 @@ Genie имеет доступ к аналитическим данным, ско
 
 ## Troubleshooting
 
-### Ошибка авторизации (401, `cannot configure default credentials`, `refresh token is invalid`)
+### Коды выхода `genie.sh`
 
-Залогиньтесь заново: `databricks auth login --host <workspace-url> --profile <profile>`. Скрипт печатает эту команду с вашими `GENIE_HOST` и `GENIE_PROFILE`.
+| Код | Значение |
+|---|---|
+| 0 | ответ получен |
+| 1 | ошибка (текст ошибки CLI выше): запрос не удался, нет доступа, таймаут, старый CLI, нет конфига |
+| 2 | нужен логин. Он открывает браузер, поэтому его выполняет пользователь; агент останавливается и просит его |
 
-### 403 / space не найден
+### Нужен логин (код 2: `cannot configure default credentials`, `refresh token is invalid`, нет профиля)
 
-У профиля нет доступа к space или к его warehouse. Проверьте `databricks genie list-spaces --profile <profile>` и `GENIE_SPACE_ID`.
+Выполните команду из подсказки скрипта — она ведёт в тот же workspace, что и запрос (по `GENIE_PROFILE` или `GENIE_HOST`).
 
-### `databricks CLI not found`
+### `Unauthorized access to Org` / 403 / space не найден
 
-Установите CLI (см. шаг 1).
+Логин не поможет: у учётной записи нет доступа к workspace, space или его warehouse — это выдаётся правами. Проверьте `databricks genie list-spaces --profile <profile>` и `GENIE_SPACE_ID`.
+
+### `databricks CLI not found` / `Update databricks CLI`
+
+Установите или обновите CLI (см. шаг 1).
 
 ### Пустой ответ
 

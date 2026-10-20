@@ -16,9 +16,11 @@ OAuth через databricks CLI — PAT не нужен. Один раз зал�
 databricks auth login --host https://<workspace>.azuredatabricks.net --profile <profile>
 ```
 
-Свежий access token CLI выдаёт командой `databricks auth token --profile <profile>` и сам обновляет его
-по refresh token. Токен живёт около часа, поэтому статичный заголовок в конфиге не годится — его надо
-получать при каждом подключении.
+Свежий access token CLI выдаёт командой `databricks auth token` и сам обновляет его по refresh token.
+Токен живёт около часа, поэтому статичный заголовок в конфиге не годится — его надо получать при каждом
+подключении. Саму команду в терминале не запускайте: токен окажется в выводе (а у агента — в его
+контексте). Ниже она всегда стоит в пайпе. Проверить логин можно без токена: `databricks auth profiles`
+или `databricks genie list-spaces --profile <profile>`.
 
 ## Подключение к Claude Code
 
@@ -37,7 +39,20 @@ databricks auth login --host https://<workspace>.azuredatabricks.net --profile <
 }
 ```
 
-Или для всех проектов: `claude mcp add-json databricks-genie '<тот же объект сервера>' --scope user`.
+Или для всех проектов одной командой. Объект передаётся через heredoc с `'JSON'` в кавычках: так
+одинарные кавычки фильтра jq доходят до конфига как есть (в одинарных кавычках аргумента они бы его
+порвали):
+
+```bash
+claude mcp add-json databricks-genie "$(cat <<'JSON'
+{
+  "type": "http",
+  "url": "https://<workspace>.azuredatabricks.net/api/2.0/mcp/genie/<space_id>",
+  "headersHelper": "databricks auth token --profile <profile> -o json | jq -c '{Authorization: (\"Bearer \" + .access_token)}'"
+}
+JSON
+)" --scope user
+```
 
 ## Доступные MCP Tools
 
