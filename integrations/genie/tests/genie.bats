@@ -4,6 +4,8 @@
 # (обезличенным) выводом `databricks genie start-conversation -o json` из fixtures/ — так
 # форматтер проверяется на настоящем формате CLI, а не на рукописном. Ошибку CLI стаб
 # изображает текстом из файла cli-error: тексты взяты из реального CLI v1.13.0.
+# `databricks auth token` (прогрев токена перед вопросом) стаб пишет в отдельный журнал
+# auth.log и отвечает токеном-приманкой: в выводе genie.sh её быть не должно.
 # curl — стаб, который только отмечает, что его позвали.
 #
 # Скрипты лежат в песочнице как subtree внутри overlay-репо: .env — в корне overlay, выше
@@ -31,6 +33,17 @@ ENV
     mkdir -p "$SANDBOX/bin"
     cat > "$SANDBOX/bin/databricks" <<STUB
 #!/usr/bin/env bash
+if [[ "\$1" == auth ]]; then
+    printf '%s\n' "\$@" >> "$SANDBOX/auth.log"
+    printf -- '---\n' >> "$SANDBOX/auth.log"
+    # Прогревы не должны идти одновременно: второй, вошедший до выхода первого, — гонка.
+    mkdir "$SANDBOX/auth-inside" 2>/dev/null || touch "$SANDBOX/auth-overlap"
+    sleep "\${AUTH_SLEEP:-0}"
+    rmdir "$SANDBOX/auth-inside" 2>/dev/null
+    [[ -f "$SANDBOX/auth-fails" ]] && { echo "Error: auth token: not a U2M profile" >&2; exit 1; }
+    echo '{"access_token":"warm-secret-token","token_type":"Bearer"}'
+    exit 0
+fi
 printf '%s\n' "\$@" >> "$SANDBOX/databricks.log"
 printf -- '---\n' >> "$SANDBOX/databricks.log"
 printf '%s\n' "\${DATABRICKS_HOST-<unset>}" >> "$SANDBOX/databricks-host.log"
@@ -50,6 +63,9 @@ STUB
     export PATH
     # Конфиг, профиль и хост из окружения разработчика не должны просочиться в тест.
     unset GENIE_HOST GENIE_PROFILE GENIE_SPACE_ID GENIE_TOKEN DATABRICKS_CONFIG_PROFILE DATABRICKS_HOST
+    # Блокировка прогрева живёт в TMPDIR — у каждого теста свой.
+    mkdir -p "$SANDBOX/tmp"
+    export TMPDIR="$SANDBOX/tmp"
 
     GENIE="$HUB/integrations/genie/scripts/genie.sh"
 }
@@ -80,6 +96,40 @@ drop_env() {
     [[ "$output" == *"main.sales.orders"* ]] || false
     # Реальный CLI отдаёт пустой suggested_questions ({}), заголовок без вопросов не печатаем.
     [[ "$output" != *"Suggested questions"* ]] || false
+}
+
+@test "the token is warmed for the same workspace before the question, without printing it" {
+    run bash "$GENIE" "q"
+    [ "$status" -eq 0 ]
+    [[ "$(cat "$SANDBOX/auth.log")" == auth$'\n'token$'\n'*$'\n'--profile$'\n'team$'\n'* ]] || false
+    [[ "$output" != *"warm-secret-token"* ]] || false
+    # Блокировка снята.
+    [ -z "$(ls -A "$SANDBOX/tmp")" ]
+}
+
+@test "parallel calls warm the token one at a time" {
+    AUTH_SLEEP=0.3 bash "$GENIE" "q1" > "$SANDBOX/o1" 2>&1 &
+    AUTH_SLEEP=0.3 bash "$GENIE" "q2" > "$SANDBOX/o2" 2>&1 &
+    AUTH_SLEEP=0.3 bash "$GENIE" "q3" > "$SANDBOX/o3" 2>&1 &
+    wait
+    [ "$(grep -c '^token$' "$SANDBOX/auth.log")" -eq 3 ]
+    [ ! -f "$SANDBOX/auth-overlap" ]
+    [ "$(grep -c '^start-conversation$' "$SANDBOX/databricks.log")" -eq 3 ]
+}
+
+@test "a lock left by a killed process does not block the question" {
+    mkdir -p "$SANDBOX/tmp/genie-auth-team.lock"
+    GENIE_LOCK_WAIT_SECONDS=1 run bash "$GENIE" "q"
+    [ "$status" -eq 0 ]
+    grep -qx "token" "$SANDBOX/auth.log"
+    grep -qx "start-conversation" "$SANDBOX/databricks.log"
+}
+
+@test "a failed warm-up does not stop the question" {
+    touch "$SANDBOX/auth-fails"
+    run bash "$GENIE" "q"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"1,234,567 rows"* ]] || false
 }
 
 @test "a question starting with a dash goes as content, not as a CLI flag" {
