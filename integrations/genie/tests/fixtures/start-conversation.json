@@ -1,0 +1,52 @@
+{
+  "attachments": [
+    {
+      "attachment_id": "00000000000000000000000000000005",
+      "query": {
+        "description": "You want to know the total number of rows in the orders table.",
+        "query": "SELECT COUNT(*) AS row_count FROM `main`.`sales`.`orders`",
+        "query_result_metadata": {
+          "row_count": 1
+        },
+        "statement_id": "00000000-0000-0000-0000-000000000004",
+        "thoughts": [
+          {
+            "content": "You want to know the total number of rows in the orders table.",
+            "thought_type": "THOUGHT_TYPE_DESCRIPTION"
+          },
+          {
+            "content": "- main.sales.orders",
+            "thought_type": "THOUGHT_TYPE_DATA_SOURCING"
+          },
+          {
+            "content": "- Count the total number of rows in the table named orders.",
+            "thought_type": "THOUGHT_TYPE_STEPS"
+          }
+        ]
+      }
+    },
+    {
+      "attachment_id": "00000000000000000000000000000006",
+      "suggested_questions": {}
+    },
+    {
+      "text": {
+        "content": "The table `orders` contains **1,234,567 rows**.",
+        "purpose": "TEXT_ATTACHMENT_PURPOSE_ANSWER"
+      }
+    }
+  ],
+  "content": "Count the rows in one of the available tables",
+  "conversation_id": "00000000000000000000000000000002",
+  "created_timestamp": 1700000000000,
+  "id": "00000000000000000000000000000003",
+  "last_updated_timestamp": 1700000035000,
+  "message_id": "00000000000000000000000000000003",
+  "query_result": {
+    "row_count": 1,
+    "statement_id": "00000000-0000-0000-0000-000000000004"
+  },
+  "space_id": "00000000000000000000000000000001",
+  "status": "COMPLETED",
+  "user_id": 1234567890
+}
