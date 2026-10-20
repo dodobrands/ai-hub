@@ -14,8 +14,10 @@
 # безопасность прогона: до блока скрипты только вычисляют пути. Если поиск сломан, скрипт
 # пойдёт дальше — поэтому stdin закрыт, а curl/open/az/osascript подменены отказом.
 #
-# Мягкие скрипты (без load-env.sh работают дальше, а не падают) в сценарии «hub-meta нет»
-# не запускаются: дальше они сделали бы настоящую работу.
+# Без hub-meta скрипт обязан упасть с понятной причиной, а не работать дальше без .env.
+# Исключения перечислены в soft_for явно: такой скрипт без load-env.sh продолжает работу
+# намеренно, и в сценарии «hub-meta нет» его не запускаем — дальше он сделал бы настоящую
+# работу. Список явный, чтобы скрипт, потерявший отказ, не стал мягким молча.
 #
 # Любой провал → exit≠0 → CI красный.
 set -uo pipefail
@@ -38,6 +40,14 @@ HUB_META_NEWEST="1.10.0"
 entry_for(){
   case "$1" in
     */ktalk-auth.sh) echo ktalk_init_auth ;;
+  esac
+}
+
+soft_for(){
+  case "$1" in
+    */buildin-shadow.sh) echo "shadow-индекс читается локально и без .env" ;;
+    */time-messages.sh)  echo "обёртка над time.sh, отказ даёт сам time.sh" ;;
+    */ktalk-auth.sh)     echo "токены можно передать через окружение" ;;
   esac
 }
 
@@ -81,7 +91,7 @@ for rel in $SCRIPTS; do
   inner="${rel#integrations/$plugin/}"
   case_dir="$TMP/case$n"
   mark="$case_dir/mark"
-  hard=0; grep -q 'load-env.sh not found' "$rel" && hard=1
+  soft="$(soft_for "$rel")"
 
   # 1. Исходники: standalone-клон, subtree в overlay-репо, marketplace из локальной папки.
   dst="$case_dir/src/integrations/$plugin/$inner"
@@ -109,8 +119,10 @@ for rel in $SCRIPTS; do
   if [ "$got" = "$HUB_META_NEWEST" ]; then pass "$rel — \$CLAUDE_PLUGIN_ROOT"
   else fail "$rel — \$CLAUDE_PLUGIN_ROOT: подключён «${got:-ничего}», ждали hub-meta $HUB_META_NEWEST ($(head -c 200 "$TMP/out.txt"))"; fi
 
-  # 4. hub-meta нет: жёсткий скрипт падает с понятной причиной, а не идёт дальше без .env.
-  if [ "$hard" -eq 1 ]; then
+  # 4. hub-meta нет: скрипт падает с понятной причиной, а не идёт дальше без .env.
+  if [ -n "$soft" ]; then
+    printf '  SKIP  %s — без hub-meta: мягкий (%s)\n' "$rel" "$soft"
+  else
     dst="$case_dir/bare/integrations/$plugin/$inner"
     mkdir -p "$(dirname "$dst")"; cp "$rel" "$dst"
     rm -f "$mark"; run_script "$dst" "$mark" ""; code=$?
