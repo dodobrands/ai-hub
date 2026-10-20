@@ -1,6 +1,7 @@
 {
   "name": "time",
-  "version": "1.1.4",
+  "version": "1.1.5",
+  "dependencies": ["hub-meta"],
   "description": "[DEPRECATED — используй dodo-time] Time (Mattermost) API client — чтение каналов, сообщений, тредов",
   "author": {
     "name": "AI Hub Contributors"

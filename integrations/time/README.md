@@ -44,6 +44,8 @@ integrations/time/
 
 ## Быстрый старт
 
+> Нужен плагин `hub-meta`: скрипты берут из него загрузчик `.env` (`hub-meta/scripts/load-env.sh`). При установке плагином Claude Code ставит его сам — он объявлен в `dependencies` в `plugin.json`; в клоне и subtree он и так лежит рядом.
+
 ### 1. Настрой авторизацию
 
 **Личный аккаунт — Google SSO** (рекомендуется):
