@@ -1,5 +1,8 @@
 {
   "name": "code-review",
   "version": "1.0.0",
-  "description": "Autonomous C#/.NET code review — fail-fast pipeline with mechanical checks + AI sub-agents (performance, architecture, correctness, UI/Blazor)"
+  "description": "Autonomous C#/.NET code review — fail-fast pipeline with mechanical checks + AI sub-agents (performance, architecture, correctness, UI/Blazor)",
+  "author": {
+    "name": "AI Hub Contributors"
+  }
 }

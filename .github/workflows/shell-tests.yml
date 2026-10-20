@@ -11,6 +11,9 @@ on:
     paths:
       - 'integrations/**'
       - 'tests/**'
+      # Манифесты: PR, правящий только версию в каталоге, иначе не запустил бы
+      # manifest-versions.sh — а это ровно тот случай, ради которого гейт заведён.
+      - '.claude-plugin/**'
       - '.github/workflows/shell-tests.yml'
   push:
     branches:

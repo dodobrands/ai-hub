@@ -86,9 +86,26 @@ ln -sf ../integrations/<integration-name>/commands/<command-name>.md commands/<c
 
 **Важно:** симлинки должны использовать **относительные пути**, чтобы работать на любой машине после `git clone`.
 
-### Шаг 4: Добавление в marketplace.json
+### Шаг 4: Запись в marketplace.json
 
-Добавь запись о новом скилле в `.claude-plugin/marketplace.json` — в массив `plugins`:
+Запись в каталоге — **одна на интеграцию**, а не на каждую команду. Шаг 1 уже
+убедился, что интеграция существует, так что чаще всего запись у неё тоже есть
+и добавлять ничего не надо. Проверь:
+
+```bash
+python3 - <<'EOF'
+import json
+names = [p["name"] for p in json.load(open(".claude-plugin/marketplace.json"))["plugins"]]
+print("ЕСТЬ — не добавляй" if "<integration-name>" in names else "НЕТ — добавь запись")
+EOF
+```
+
+**Запись есть** — не добавляй вторую. Две записи с одним `name` ломают каталог:
+Claude Code отвергает его целиком (`Duplicate plugin name`), а
+`tests/manifest-versions.sh` валит CI. Версию существующей записи поднимешь на
+шаге 6.
+
+**Записи нет** (интеграция ещё не опубликована) — добавь в массив `plugins`:
 
 ```json
 {
@@ -104,9 +121,24 @@ ln -sf ../integrations/<integration-name>/commands/<command-name>.md commands/<c
 }
 ```
 
+И сразу заведи `integrations/<integration-name>/.claude-plugin/plugin.json` с
+тем же `name` и той же `version` — без него запись в каталоге осиротеет и гейт
+покраснеет:
+
+```json
+{
+  "name": "<integration-name>",
+  "version": "1.0.0",
+  "description": "<описание>",
+  "author": {
+    "name": "AI Hub Contributors"
+  }
+}
+```
+
 ### Шаг 5: Обновление README.md
 
-Добавь новый скилл в каталог в `merketplace/README.md`. В файле есть две таблицы скиллов:
+Добавь новый скилл в каталог в корневом `README.md`. В файле есть две таблицы скиллов:
 
 1. **«Универсальные — для любой команды»** — скиллы общего назначения, без привязки к конкретной команде
 2. **«Специфичные для команды»** — скиллы с захардкоженными настройками (ID досок, колонок, конфигов) под конкретную команду
@@ -122,7 +154,13 @@ ln -sf ../integrations/<integration-name>/commands/<command-name>.md commands/<c
 
 ### Шаг 6: Bump версии плагина
 
-Увеличь **patch-версию** в `.claude-plugin/plugin.json` (поле `version`), например `1.0.0` → `1.1.0`.
+Увеличь **patch-версию** в `integrations/<integration-name>/.claude-plugin/plugin.json` (поле `version`), например `1.0.0` → `1.1.0`, и **ровно ту же версию проставь в записи плагина в `.claude-plugin/marketplace.json`**.
+
+Версии в двух файлах сверяет `tests/manifest-versions.sh`: разойдутся — CI покраснеет. Проверить до пуша:
+
+```bash
+bash tests/manifest-versions.sh
+```
 
 ### Шаг 7: Проверка
 
