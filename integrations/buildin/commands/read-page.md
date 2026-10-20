@@ -1,6 +1,6 @@
 ---
 name: read-page
-description: Read a Buildin.ai page as markdown (by URL, page_id, or search query)
+description: Read a Buildin.ai page as markdown (by URL, page_id, or search query) and its comment threads; reply to, resolve or reopen a thread
 argument-hint: "<url_or_page_id_or_search_query>"
 allowed-tools: ["Bash", "Read", "Glob", "Grep", "AskUserQuestion"]
 ---
@@ -77,6 +77,12 @@ bash "$BUILDIN_SCRIPTS/buildin-pages.sh" read "<page_id>"
 
 UI API возвращает все блоки страницы за один запрос (без пагинации).
 
+Упоминание человека в тексте приходит как `@ник`, а если ника нет — как первые 8
+символов его uuid. Упоминание страницы приходит ссылкой `[Название](https://buildin.ai/…)`,
+а без доступа к странице — ссылкой без названия. Дата печатается как `2026-10-16 14:30`.
+Чтобы прокомментировать дату, якорь для `comment` — «‣», а не напечатанная дата: так
+она хранится в тексте блока.
+
 Если пользователь спрашивает про **комментарии** (треды обсуждений на блоках):
 
 ```bash
@@ -85,7 +91,20 @@ bash "$BUILDIN_SCRIPTS/buildin-pages.sh" comments "<page_id|url>"
 
 URL с якорем (`https://buildin.ai/<page>#<block>`) фильтрует по конкретному блоку —
 передавай его как есть. Пустой текст комментария из одних `@Имя` — это пинг людей
-без реплики, так и объясняй.
+без реплики, так и объясняй. Даты и упоминания в комментариях печатаются так же,
+как в `read`. Ответить в тред, закрыть его или открыть заново
+можно прямо отсюда; id треда — строка `Тред <uuid>` в выводе `comments`:
+
+```bash
+bash "$BUILDIN_SCRIPTS/buildin-pages.sh" comment-reply "<page_id>" "<discussion_uuid>" 'текст ответа'
+bash "$BUILDIN_SCRIPTS/buildin-pages.sh" comment-resolve "<page_id>" "<discussion_uuid>"
+bash "$BUILDIN_SCRIPTS/buildin-pages.sh" comment-unresolve "<page_id>" "<discussion_uuid>"
+```
+
+Это запись в чужой документ — только по просьбе пользователя. Текст с кавычками
+или `$` передавай файлом (`@путь`). Упоминания, коды выхода и откат описаны в
+`publish-page.md`, в пункте «Комментарий к фразе внутри блока»; сам навык
+`/ai-hub:buildin-publish` запускать для этого не нужно.
 
 ### Фаза 3: Обновить shadow-индекс
 

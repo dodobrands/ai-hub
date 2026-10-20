@@ -1,184 +1,15 @@
 #!/usr/bin/env bash
-# bash-слой команды `comment` под /bin/bash: разбор аргументов, формы ввода,
-# --dry-run, откат, поведение при параллельной записи.
+# bash-слой команды comment под /bin/bash: разбор аргументов, формы ввода,
+# --dry-run, откат, поведение при параллельной записи. Команды тредов — в
+# comment-threads.sh, общий стаб и хелперы — в comment-harness.sh.
 #
 # Зачем отдельно от bats-юнитов: те бьют по чистому питоновскому билдеру, а
 # ошибки разбора аргументов и склейки живут в shell. Опечатка «--dryrun», молча
 # ставшая позиционным аргументом, делала боевую запись вместо превью — ровно
 # такой класс багов сюда и ловится. Плюс на macOS /bin/bash = 3.2, целевой шелл
 # скриптов хаба, и он проверяется тем же прогоном.
-#
-# buildin.sh застаблен и ПРИМЕНЯЕТ операции к состоянию: иначе проверку после
-# записи («подсветка закрепилась?») нельзя ни подтвердить, ни опровергнуть.
-set -u
 
-TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$TESTS_DIR/../scripts"
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-FAILS=0
-
-fail() { echo "FAIL: $1"; FAILS=$((FAILS + 1)); }
-ok()   { echo "ok:   $1"; }
-
-PAGE=11111111-1111-4111-8111-111111111111
-BLOCK=22222222-2222-4222-8222-222222222222
-SPACE=33333333-3333-4333-8333-333333333333
-OTHER=44444444-4444-4444-4444-444444444444
-
-mkdir -p "$TMP/scripts" "$TMP/log"
-cp "$SRC_DIR/buildin-pages.sh" "$SRC_DIR/buildin-comment.py" "$TMP/scripts/"
-
-# Состояние страницы: один блок с тремя сегментами — обычный, code, хвост.
-# «лимит» встречается дважды (в «безлимитный» и отдельно) — материал для
-# проверки неоднозначности.
-write_fixture() {
-    cat > "$TMP/state.json" <<DOC
-{"code":200,"data":{"blocks":{"$BLOCK":{
-  "uuid":"$BLOCK","spaceId":"$SPACE","type":1,"discussions":[],
-  "data":{"pageFixedWidth":true,"format":{"commentAlignment":"top"},
-    "segments":[
-      {"text":"безлимитный тариф: лимит ","type":0,"enhancer":{}},
-      {"text":"100 запросов","type":0,"enhancer":{"code":true}},
-      {"text":" в минуту","type":0,"enhancer":{}}]}}}}}
-DOC
-}
-write_fixture
-
-# Применение операций к состоянию + режимы имитации чужого писателя.
-cat > "$TMP/scripts/apply-ops.py" <<'APPLY'
-import copy, json, os, sys
-
-state_path, body_path, block_id = sys.argv[1:4]
-state = json.load(open(state_path))
-block = state["data"]["blocks"][block_id]
-
-
-def foreign_split(segments, uuid_):
-    """Сегменты так, как их записал бы ЧУЖОЙ comment из того же снапшота:
-    свой кусок подсвечен, остальная подсветка снапшота сохранена."""
-    segments = copy.deepcopy(segments)
-    first = segments[0]
-    text = first["text"]
-    head = dict(first, text=text[:11], discussions=[uuid_])
-    tail = dict(first, text=text[11:])
-    tail.pop("discussions", None)
-    return [head, tail] + segments[1:]
-
-
-ops = json.load(open(body_path))["transactions"][0]["operations"]
-before_segments = copy.deepcopy(block["data"].get("segments", []))
-
-# Чужая запись ДО нашей: её подсветку наши сегменты затрут, а в списке она
-# останется (listAfter аддитивен) — так теряют подсветку параллельные треды.
-before_uuid = os.environ.get("STUB_FOREIGN_BEFORE_POST")
-if before_uuid:
-    block["data"]["segments"] = foreign_split(before_segments, before_uuid)
-    block.setdefault("discussions", []).append(before_uuid)
-
-if not os.environ.get("STUB_IGNORE_WRITES"):
-    for op in ops:
-        if op.get("table") != "block" or op["id"] != block_id:
-            continue
-        if op["command"] == "update" and op.get("path") == ["data"]:
-            block["data"].update(op["args"])
-        elif op["command"] == "listAfter" and op.get("path") == ["discussions"]:
-            block.setdefault("discussions", []).append(op["args"]["uuid"])
-        elif op["command"] == "listRemove" and op.get("path") == ["discussions"]:
-            block["discussions"] = [d for d in block.get("discussions", []) if d != op["args"]["uuid"]]
-
-# Чужая запись ПОСЛЕ нашей, построенная из ДОнашего снапшота: затирает нашу
-# подсветку — так проигрывают гонку.
-after_uuid = os.environ.get("STUB_FOREIGN_AFTER_POST")
-if after_uuid and any(o["command"] == "update" and o.get("path") == ["data"] for o in ops):
-    block["data"]["segments"] = foreign_split(before_segments, after_uuid)
-    if after_uuid not in block.get("discussions", []):
-        block.setdefault("discussions", []).append(after_uuid)
-
-json.dump(state, open(state_path, "w"), ensure_ascii=False)
-APPLY
-
-# Стаб отвечает только на СВОЮ страницу и умеет ломаться: без этого ветки
-# отказов недостижимы, а регресс comments проходил бы, даже если разбор
-# идентификаторов начнёт брать UUID пространства вместо страницы.
-# Ручки (все через окружение):
-#   STUB_FAIL_GET_AFTER_WRITE  — чтение после записи падает
-#   STUB_FAIL_POST             — падает сам POST
-#   STUB_INBAND_ERROR          — чтение после записи отдаёт конверт ошибки (HTTP 200, code 500)
-#   STUB_FAIL_SECOND_POST      — первый POST проходит, второй (самоочистка) падает
-#   STUB_MUTATE_ON_GET=N       — начиная с N-го чтения сегменты блока другие
-#   STUB_IGNORE_WRITES         — POST принимается, но состояние не меняется
-restore_stateful_stub() {
-    cat > "$TMP/scripts/buildin.sh" <<STUB
-#!/usr/bin/env bash
-METHOD="\$1"; ENDPOINT="\$2"; BODY="\${3:-}"
-LOG_DIR="$TMP/log"
-printf '%s %s\n' "\$METHOD" "\$ENDPOINT" >> "\$LOG_DIR/calls.txt"
-case "\$ENDPOINT" in
-    /api/users/me)
-        echo '{"code":200,"data":{"uuid":"user-1"}}' ;;
-    /api/docs/$PAGE)
-        N=\$(cat "\$LOG_DIR/getn" 2>/dev/null || echo 0); N=\$((N + 1)); echo "\$N" > "\$LOG_DIR/getn"
-        if [ -n "\${STUB_FAIL_GET_AFTER_WRITE:-}" ] && [ -s "\$LOG_DIR/tx-body.json" ]; then
-            echo "Error: HTTP 503" >&2; exit 1
-        fi
-        if [ -n "\${STUB_INBAND_ERROR:-}" ] && [ -s "\$LOG_DIR/tx-body.json" ]; then
-            echo '{"code":500,"msg":"stub: in-band error"}'; exit 0
-        fi
-        if [ -n "\${STUB_MUTATE_ON_GET:-}" ] && [ "\$N" -ge "\$STUB_MUTATE_ON_GET" ]; then
-            cat "$TMP/state-changed.json"; exit 0
-        fi
-        cat "$TMP/state.json" ;;
-    /api/records/transactions)
-        P=\$(cat "\$LOG_DIR/postn" 2>/dev/null || echo 0); P=\$((P + 1)); echo "\$P" > "\$LOG_DIR/postn"
-        if [ -n "\${STUB_FAIL_POST:-}" ]; then echo "Error: HTTP 502" >&2; exit 1; fi
-        if [ -n "\${STUB_FAIL_SECOND_POST:-}" ] && [ "\$P" -ge 2 ]; then
-            echo "Error: HTTP 502" >&2; exit 1
-        fi
-        printf '%s' "\$BODY" >> "\$LOG_DIR/tx-all.json"
-        printf '%s' "\$BODY" > "\$LOG_DIR/tx-body.json"
-        python3 "$TMP/scripts/apply-ops.py" \\
-            "$TMP/state.json" "\$LOG_DIR/tx-body.json" "$BLOCK"
-        echo '{"code":200,"data":true}' ;;
-    *)
-        echo '{"code":404,"msg":"stub: unexpected endpoint"}' >&2; exit 1 ;;
-esac
-STUB
-    chmod +x "$TMP/scripts/buildin.sh"
-}
-restore_stateful_stub
-
-# Блок с другим текстом — для ручки STUB_MUTATE_ON_GET.
-cat > "$TMP/state-changed.json" <<DOC
-{"code":200,"data":{"blocks":{"$BLOCK":{
-  "uuid":"$BLOCK","spaceId":"$SPACE","type":1,"discussions":[],
-  "data":{"pageFixedWidth":true,
-    "segments":[{"text":"кто-то переписал блок, но фраза в минуту цела","type":0,"enhancer":{}}]}}}}}
-DOC
-
-# Прогон команды под /bin/bash. Печатает rc; stdout/stderr — в log/.
-run_comment() {
-    rm -f "$TMP/log/tx-body.json" "$TMP/log/tx-all.json" \
-          "$TMP/log/getn" "$TMP/log/postn" "$TMP/log/calls.txt"
-    [ -n "${SKIP_RESET:-}" ] || write_fixture
-    /bin/bash "$TMP/scripts/buildin-pages.sh" comment "$@" \
-        > "$TMP/log/stdout.txt" 2> "$TMP/log/stderr.txt"
-    echo $?
-}
-run_cmd() { # произвольная подкоманда — для регресса comments
-    /bin/bash "$TMP/scripts/buildin-pages.sh" "$@" > "$TMP/log/stdout.txt" 2> "$TMP/log/stderr.txt"
-    echo $?
-}
-sent()   { [ -s "$TMP/log/tx-body.json" ]; }
-stderr() { cat "$TMP/log/stderr.txt"; }
-stdout() { cat "$TMP/log/stdout.txt"; }
-block_state() { python3 -c "
-import json, sys
-b = json.load(open('$TMP/state.json'))['data']['blocks']['$BLOCK']
-segs = b['data']['segments']
-lit = {t for s in segs for t in (s.get('discussions') or [])}
-print(json.dumps({'listed': b.get('discussions', []), 'lit': sorted(lit),
-                  'text': ''.join(s['text'] for s in segs), 'n': len(segs)}, ensure_ascii=False))
-"; }
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/comment-harness.sh"
 
 # ---- P1 #1 (раунд 1): неизвестные флаги не становятся позиционными ----------
 RC=$(run_comment "$PAGE" "$BLOCK" 'в минуту' 'текст' --dryrun)
@@ -197,7 +28,6 @@ fi
 
 # Пустая переменная не должна съедать следующий флаг: так --dry-run становился
 # путём, и превью превращалось в боевую запись.
-EMPTY=""
 RC=$(run_comment "$PAGE" "$BLOCK" 'в минуту' 'текст' --rollback-out $EMPTY --dry-run)
 if [ "$RC" -ne 0 ] && ! sent && stderr | grep -q 'rollback-out без значения'; then
     ok "--rollback-out с пустым значением не съедает следующий флаг"
@@ -249,7 +79,9 @@ fi
 if stdout | python3 -c "
 import json, sys
 ops = json.load(sys.stdin)
-assert [o['command'] for o in ops] == ['set','set','update','listAfter','update'], ops
+assert [o['command'] for o in ops] == ['set','set','update','listAfter','update','update'], ops
+# как UI: правкой отмечается и страница, а не только блок
+assert ops[4]['id'] == '$PAGE' and set(ops[4]['args']) == {'updatedAt', 'updatedBy'}, ops[4]
 " 2>/dev/null; then
     ok "--dry-run напечатал операции транзакции"
 else
@@ -257,7 +89,6 @@ else
 fi
 
 # ---- #11 (раунд 1): пустые значения после разворачивания ---------------------
-: > "$TMP/empty.txt"
 RC=$(printf '' | run_comment "$PAGE" "$BLOCK" 'в минуту' -)
 if [ "$RC" -ne 0 ] && ! sent && stderr | grep -q 'текст комментария пустой'; then
     ok "пустой stdin как текст отвергнут"
@@ -510,7 +341,7 @@ fi
 # ---- #5 (раунд 3): transaction() не шлёт пустое тело ни в каком контексте ----
 # Регрессия из fcb0107: сбор тела подстановкой в аргументе прятал сбой от set -e.
 # Вторая половина — вызов в условии if, где bash глушит set -e во всей функции.
-python3 - "$SRC_DIR/buildin-pages.sh" "$TMP/tx-probe.sh" <<'EXTRACT'
+python3 - "$SRC_DIR/buildin-lib.sh" "$TMP/tx-probe.sh" <<'EXTRACT'
 import sys
 src_path, out_path = sys.argv[1:3]
 src = open(src_path, encoding="utf-8").read()
@@ -524,19 +355,32 @@ open(out_path, "w", encoding="utf-8").write(
     'buildin() { echo "POST-SENT" >> "$PROBE_LOG"; }\n'
     + tx_body + "\n" + transaction + "\n"
     'case "$1" in\n'
+    '  valid) transaction sp "[]" ;;\n'
     '  plain) transaction sp "не-json" ;;\n'
     '  guard) if ! transaction sp "не-json"; then echo "if-ветка" >/dev/null; fi ;;\n'
     'esac\n')
 EXTRACT
-for mode in plain guard; do
-    : > "$TMP/log/probe-$mode.txt"
-    PROBE_LOG="$TMP/log/probe-$mode.txt" /bin/bash "$TMP/tx-probe.sh" "$mode" >/dev/null 2>&1 || true
-    if [ -s "$TMP/log/probe-$mode.txt" ]; then
-        fail "transaction ($mode): POST ушёл с пустым телом"
-    else
-        ok "transaction ($mode): сбой сборки тела не даёт отправить POST"
-    fi
-done
+# Проба собирается вырезкой из buildin-lib.sh по точному тексту. Сдвинется
+# текст — пробы не будет, и обе проверки ниже прошли бы, ничего не запустив.
+# Поэтому: проба обязана собраться, а с валидными операциями — отправить POST.
+: > "$TMP/log/probe-valid.txt"
+PROBE_LOG="$TMP/log/probe-valid.txt" /bin/bash "$TMP/tx-probe.sh" valid >/dev/null 2>&1 || true
+if [ ! -s "$TMP/tx-probe.sh" ]; then
+    fail "проба transaction() не собрана: текст buildin-lib.sh сдвинулся, проверка не запускалась"
+elif [ ! -s "$TMP/log/probe-valid.txt" ]; then
+    fail "проба transaction() не шлёт POST и с валидными операциями — она ничего не проверяет"
+else
+    ok "проба transaction() рабочая: с валидными операциями POST уходит"
+    for mode in plain guard; do
+        : > "$TMP/log/probe-$mode.txt"
+        PROBE_LOG="$TMP/log/probe-$mode.txt" /bin/bash "$TMP/tx-probe.sh" "$mode" >/dev/null 2>&1 || true
+        if [ -s "$TMP/log/probe-$mode.txt" ]; then
+            fail "transaction ($mode): POST ушёл с пустым телом"
+        else
+            ok "transaction ($mode): сбой сборки тела не даёт отправить POST"
+        fi
+    done
+fi
 
 # ---- #6 (раунд 3): временные файлы команды не остаются на диске -------------
 # Голый mktemp на macOS игнорирует TMPDIR и кладёт файлы в /var/folders/...,
@@ -576,6 +420,41 @@ else
     fail "утечка временных файлов (rc=$RC, создано=$CREATED, осталось=$STRAY)"
 fi
 
+# Та же проба на остальных командах: копии страницы и списка участников они
+# тоже кладут во временные файлы — и на успехе, и на отказе.
+leak_check() { # $1 — подпись, дальше — подкоманда с аргументами
+    local label="$1" rc created stray f
+    shift
+    : > "$PROBE_LOG"
+    rc=$(PATH="$TMP/bin:$PATH" MKTEMP_PROBE_DIR="$PROBE" MKTEMP_PROBE_LOG="$PROBE_LOG" run_sub "$@")
+    created=$(wc -l < "$PROBE_LOG" | tr -d ' ')
+    stray=0
+    while IFS= read -r f; do
+        case "$f" in *buildin-rollback-*) continue ;; esac
+        [ -e "$f" ] && { stray=$((stray + 1)); echo "      остался: $f"; }
+    done < "$PROBE_LOG"
+    if [ "$created" -ge 1 ] && [ "$stray" -eq 0 ]; then
+        ok "временные файлы удалены: $label (rc=$rc, создано $created)"
+    else
+        fail "утечка временных файлов: $label (rc=$rc, создано=$created, осталось=$stray)"
+    fi
+}
+write_thread_fixture false
+leak_check "comment-reply" comment-reply "$PAGE" "$THREAD" 'ответ'
+write_thread_fixture false
+leak_check "comment-reply --mention" comment-reply "$PAGE" "$THREAD" 'ответ' "--mention=$OTHER"
+write_thread_fixture true
+leak_check "comment-reply в закрытый тред, отказ" comment-reply "$PAGE" "$THREAD" 'ответ'
+write_thread_fixture false
+leak_check "comment-resolve" comment-resolve "$PAGE" "$THREAD"
+write_fixture
+leak_check "comment --mention" comment "$PAGE" "$BLOCK" 'в минуту' 'текст' "--mention=$OTHER"
+RC=$(run_comment "$PAGE" "$BLOCK" 'в минуту' 'текст' "--rollback-out=$TMP/leak-rb.json")
+leak_check "comment-rollback --dry-run" comment-rollback "$TMP/leak-rb.json" --dry-run
+leak_check "comment-rollback" comment-rollback "$TMP/leak-rb.json"
+leak_check "members" members "$PAGE"
+leak_check "comments" comments "$PAGE"
+
 CLEANDIR="$TMP/tmpdir-probe"; rm -rf "$CLEANDIR"; mkdir -p "$CLEANDIR"
 
 # ---- #23 (раунд 3): результат успешного запуска лежит в stdout --------------
@@ -583,8 +462,10 @@ write_fixture
 RC=$(run_comment "$PAGE" "$BLOCK" 'в минуту' 'текст')
 OUT_ID=$(stdout | sed -n 's/^discussion: //p')
 ERR_ID=$(stderr | sed -n 's/^discussion: //p' | head -1)
-if [ "$RC" -eq 0 ] && [ -n "$OUT_ID" ] && [ "$OUT_ID" = "$ERR_ID" ] && [ "$(stdout | wc -l | tr -d ' ')" -eq 1 ]; then
-    ok "успешный запуск печатает id треда в stdout и ничего лишнего"
+RB_ERR=$(stderr | sed -n 's/^Откат: //p')
+if [ "$RC" -eq 0 ] && [ -n "$OUT_ID" ] && [ "$OUT_ID" = "$ERR_ID" ] && [ "$(stdout | wc -l | tr -d ' ')" -eq 2 ] \
+   && [ -n "$RB_ERR" ] && [ "$(stdout | sed -n 2p)" = "rollback: $RB_ERR" ]; then
+    ok "успешный запуск печатает в stdout id треда и путь к откату, и ничего лишнего"
 else
     fail "id треда не в stdout (rc=$RC): $(stdout | head -3)"
 fi
@@ -641,9 +522,4 @@ else
     fail "comments сломан на якоре в URL (rc=$RC): $(stdout | head -2)"
 fi
 
-echo "---"
-if [ "$FAILS" -gt 0 ]; then
-    echo "$FAILS check(s) failed"
-    exit 1
-fi
-echo "all checks passed"
+finish

@@ -57,7 +57,7 @@ copilot plugin install spike@ai-hub
 copilot plugin install testops@ai-hub
 ```
 
-Доступные плагины: `buildin`, `code-review`, `discovery`, `genie`, `holst`, `hub-meta`, `kaiten`, `reverse-product-analysis`, `spike`, `test-factory`, `testops`, `time` (⚠️ deprecated — см. `dodo-time`).
+Доступные плагины: `agent-status`, `buildin`, `code-review`, `discovery`, `genie`, `holst`, `hub-meta`, `kaiten`, `reverse-product-analysis`, `spike`, `test-factory`, `testops`, `time` (⚠️ deprecated — см. `dodo-time`).
 
 ### Через git clone или zip + setup
 
@@ -120,6 +120,7 @@ bash integrations/hub-meta/scripts/setup.sh next
 │   ├── test-factory/             #   Скилл для создания тестов
 │   ├── testops/                  #   Allure TestOps (тест-кейсы, запуски, дефекты)
 │   ├── code-review/              #   Code review workflow
+│   ├── agent-status/             #   Мод: статус сессий иконкой в сайдбаре, фоновые задачи над полем ввода
 │   └── hub-meta/                 #   Мета-команды хаба (используется для разработки самого хаба)
 ├── team-config.example.json      # Шаблон конфига команды
 └── CLAUDE.md                     # Инструкции для AI-агента
@@ -159,6 +160,8 @@ integrations/
 - **[Genie](integrations/genie/)** — запросы к DWH на естественном языке через Databricks Genie. Валидация гипотез, сбор метрик, анализ данных прямо в потоке работы.
 
 - **[TestOps](integrations/testops/)** `/ai-hub:testops` — интеграция с Allure TestOps. Поиск тест-кейсов (AQL), просмотр запусков, дефектов, статистики. Создание и обновление тест-кейсов через API.
+
+- **[Agent status](integrations/agent-status/)** — мод для десктопного приложения Claude: иконка статуса в названии каждой сессии (🔄 работает, ⏳ считается, ⚠️ ждёт вас, ❌ упёрлось, ✅ готово), список фоновых задач над полем ввода и кнопка «Принято». Видно, где нужны вы, когда параллельно идёт десяток агентов.
 
 ### Автоматизация процессов
 

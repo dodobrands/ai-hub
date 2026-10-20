@@ -74,10 +74,25 @@ if [[ -z "$ENDPOINT" ]]; then
     exit 1
 fi
 
+# Таймауты — у каждого запроса: зависший запрос иначе вешал бы команду, а с
+# ней и агента. Секунды; переопределяются окружением. Мусор в переменной —
+# отказ до запроса: curl с ним упал бы непонятной ошибкой разбора аргументов.
+CONNECT_TIMEOUT="${BUILDIN_CONNECT_TIMEOUT:-10}"
+MAX_TIME="${BUILDIN_MAX_TIME:-60}"
+for timeout_var in BUILDIN_CONNECT_TIMEOUT:"$CONNECT_TIMEOUT" BUILDIN_MAX_TIME:"$MAX_TIME"; do
+    if ! [[ "${timeout_var#*:}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: ${timeout_var%%:*} должен быть целым числом секунд больше нуля, получено: ${timeout_var#*:}" >&2
+        emit_error_json 0 "bad ${timeout_var%%:*}"
+        exit 1
+    fi
+done
+
 CURL_ARGS=(
     # -sS, а не -s: прогресс по-прежнему молчит, но причину сетевого сбоя curl
     # напечатает — иначе при обрыве не видно вообще ничего.
     -sS
+    --connect-timeout "$CONNECT_TIMEOUT"
+    --max-time "$MAX_TIME"
     -X "$METHOD"
     -H "Authorization: Bearer $BUILDIN_UI_TOKEN"
     -H "Content-Type: application/json"
@@ -94,6 +109,8 @@ fi
 response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${BUILDIN_BASE_URL}${ENDPOINT}") || {
     curl_rc=$?
     echo "Error: request to Buildin failed (curl exit $curl_rc)" >&2
+    # 28 — curl не уложился в таймаут: подсказываем, что крутить.
+    [[ "$curl_rc" -eq 28 ]] && echo "       Запрос не уложился в ${MAX_TIME} с (соединение — ${CONNECT_TIMEOUT} с). Увеличьте BUILDIN_MAX_TIME или BUILDIN_CONNECT_TIMEOUT." >&2
     emit_error_json 0 "curl exit $curl_rc"
     exit 1
 }

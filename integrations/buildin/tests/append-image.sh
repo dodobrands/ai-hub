@@ -23,7 +23,8 @@ ok()   { echo "ok:   $1"; }
 
 # ---- песочница: копия скриптов + стабы --------------------------------------
 mkdir -p "$TMP/scripts" "$TMP/bin" "$TMP/log"
-cp "$SRC_DIR/buildin-pages.sh" "$SRC_DIR/buildin-blocks.py" "$TMP/scripts/"
+cp "$SRC_DIR/buildin-pages.sh" "$SRC_DIR/buildin-lib.sh" "$SRC_DIR/buildin-blocks.py" \
+   "$SRC_DIR/buildin_segments.py" "$TMP/scripts/"
 
 cat > "$TMP/scripts/buildin.sh" <<STUB
 #!/usr/bin/env bash
