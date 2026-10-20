@@ -40,7 +40,8 @@ bash integrations/hub-meta/scripts/setup.sh next
 │   ├── kusto/                    # Azure Data Explorer (логи)     → README.md
 │   ├── hub-meta/                 # create-command, skill-retro
 │   ├── code-review/              # Code review workflow
-│   └── spike-from-meeting/       # Встреча (видео+транскрипт) → md-артефакт со скриншотами
+│   ├── spike-from-meeting/       # Встреча (видео+транскрипт) → md-артефакт со скриншотами
+│   └── agent-status/             # Мод: статус сессий в сайдбаре desktop  → README.md
 └── .env                          # Токены (не в git)
 ```
 
