@@ -19,13 +19,15 @@ allowed-tools: ["Bash", "Read", "Write", "Glob", "Grep", "AskUserQuestion"]
 ## Резолвинг каталога скриптов
 
 Каталог скриптов резолвится так, чтобы команда работала из **любого** репозитория
-(standalone-клон, subtree-overlay, marketplace-install). Выполни строку-резолвер
+(standalone-клон, subtree-overlay, marketplace-install, установка через APM в `apm_modules/`).
+Поиск обёрнут в `bash -c`: в zsh шаблон пути без совпадений обрывает всю строку
+(`no matches found`), а в bash он просто пропускается. Выполни строку-резолвер
 перед вызовом скриптов; если bash-блоки запускаются отдельными shell'ами и
 переменная между ними не сохраняется — повтори её в начале нужного блока.
 
 ```bash
-# resolve-kaiten-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone
-KAITEN_SCRIPTS=$(ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/kaiten/scripts "$PWD"/integrations/kaiten/scripts 2>/dev/null | head -1)
+# resolve-kaiten-dir:start — первый существующий из кандидатов: плагин-кеш → overlay → standalone → APM
+KAITEN_SCRIPTS=$(bash -c 'ls -d "${CLAUDE_PLUGIN_ROOT:-/nope}/scripts" "$PWD"/integrations/*/integrations/kaiten/scripts "$PWD"/integrations/kaiten/scripts "$PWD"/apm_modules/*/*/integrations/kaiten/scripts 2>/dev/null | head -1')
 # resolve-kaiten-dir:end
 ```
 

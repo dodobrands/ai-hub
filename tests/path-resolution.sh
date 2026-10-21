@@ -6,6 +6,7 @@
 # ${CLAUDE_PLUGIN_ROOT} — только в плагин-контексте. Этот тест проверяет, что
 # резолвер из реальных .md находит скрипты во всех сценариях:
 #   standalone-клон, subtree-overlay (cwd ≠ корень ai-hub), marketplace-install,
+#   для kaiten — ещё установка через APM (apm_modules/) и запуск в zsh,
 #   а для скиллов (активируются из произвольного cwd) — ещё symlink-в-~/.claude
 #   и Copilot _direct.
 #
@@ -34,6 +35,9 @@ extract_skill_resolver(){ # $1=md  (резолвер skill-time: _t=… → TIME
 run_cmd(){ # snippet cwd root → каталог скриптов
   ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" bash -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
 }
+run_cmd_zsh(){ # то же в zsh: Claude Code на macOS выполняет bash-блоки в shell пользователя
+  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" zsh -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
+}
 run_skill(){ # snippet cwd root home → полный путь скрипта
   ( cd "$2" && HOME="$4" CLAUDE_PLUGIN_ROOT="$3" bash -c "set -u; $1"$'\n''printf %s "$TIME_MESSAGES"' )
 }
@@ -53,7 +57,9 @@ for INT in buildin kaiten time; do
   OV="$TMP/$INT/overlay"
   CA="$TMP/$INT/cache/$INT/9.9.9"
   UN="$TMP/$INT/unrelated/proj"
+  AP="$TMP/$INT/apm/proj"
   mk "$ST/integrations/$INT/scripts/$M"
+  mk "$AP/apm_modules/dodobrands/ai-hub/integrations/$INT/scripts/$M"
   mk "$OV/integrations/team-overlay/integrations/$INT/scripts/$M"
   mk "$CA/scripts/$M"
   mkdir -p "$UN"
@@ -66,6 +72,8 @@ for INT in buildin kaiten time; do
     "overlay-subtree, /plugin    |$OV|$OV/integrations/team-overlay/integrations/$INT"
     "marketplace (кеш плагина)   |$UN|$CA"
   )
+  # APM кладёт скрипты пакета в apm_modules/<owner>/<repo>/…; поддержан пока только kaiten
+  [ "$INT" = kaiten ] && SCN+=("apm (apm_modules)           |$AP|")
 
   for md in integrations/$INT/commands/*.md; do
     [ -f "$md" ] || continue
@@ -81,6 +89,20 @@ for INT in buildin kaiten time; do
         fail "$INT/$base — $name → [$dir]"; r=FAIL
       fi
       echo "| $INT | $base | $name | $r |" >> "$SUM"
+      # zsh обрывает строку на шаблоне без совпадений; резолвер kaiten обёрнут в bash -c и обязан работать и там
+      if [ "$INT" = kaiten ]; then
+        if command -v zsh >/dev/null 2>&1; then
+          zdir="$(run_cmd_zsh "$snip" "$cwd" "$root" 2>/dev/null)"
+          if ( cd "$cwd" && [ -f "$zdir/$M" ] ); then
+            pass "$INT/$base — $name [zsh]"; r=PASS
+          else
+            fail "$INT/$base — $name [zsh] → [$zdir]"; r=FAIL
+          fi
+          echo "| $INT | $base | $name (zsh) | $r |" >> "$SUM"
+        else
+          printf '  SKIP  %s\n' "$INT/$base — $name [zsh не установлен]"
+        fi
+      fi
     done
   done
 done
