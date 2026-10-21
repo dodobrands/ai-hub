@@ -1,6 +1,6 @@
 name: path resolution
 
-# Гейт: командные .md и скиллы (buildin, kaiten, time) должны резолвить путь к
+# Гейт: командные .md и скиллы (buildin, kaiten, ktalk, time) должны резолвить путь к
 # скриптам во всех сценариях потребления хаба (standalone / subtree-overlay /
 # marketplace-install; для скиллов — ещё symlink-в-~/.claude и Copilot _direct).
 # Тест печатает матрицу по сценариям и валит job ненулевым exit.
@@ -12,6 +12,8 @@ on:
       - 'integrations/buildin/scripts/**'
       - 'integrations/kaiten/commands/**'
       - 'integrations/kaiten/scripts/**'
+      - 'integrations/ktalk/commands/**'
+      - 'integrations/ktalk/scripts/**'
       - 'integrations/time/commands/**'
       - 'integrations/time/skills/**'
       - 'integrations/time/scripts/**'

@@ -159,6 +159,17 @@
       "source": "./integrations/agent-status",
       "category": "productivity",
       "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/agent-status"
+    },
+    {
+      "name": "ktalk",
+      "description": "Kontur Talk — official Talk MCP (meetings, participants, transcripts, summaries, protocols, search) + video download, room and meeting creation",
+      "version": "0.1.0",
+      "author": {
+        "name": "AI Hub Contributors"
+      },
+      "source": "./integrations/ktalk",
+      "category": "productivity",
+      "homepage": "https://github.com/dodobrands/ai-hub/tree/main/integrations/ktalk"
     }
   ]
 }

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ktalk": {
+      "type": "http",
+      "url": "https://dodobrands.ktalk.ru/api/mcp"
+    }
+  }
+}
