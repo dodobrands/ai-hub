@@ -10,7 +10,6 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/genie-config.sh"
 
 # Parse arguments
 RAW_OUTPUT=false
@@ -35,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             echo "  ./genie.sh --raw \"вопрос\"     # вернуть полный JSON ответ"
             echo "  ./genie.sh --no-sql \"вопрос\"  # скрыть SQL детали"
             echo ""
+            echo "Auth: databricks auth login --host <workspace-url> --profile <profile>"
+            echo "Config (.env): GENIE_SPACE_ID, GENIE_PROFILE or GENIE_HOST"
+            echo "Exit codes: 0 ok, 1 error, 2 login required (the user runs it, it opens a browser)"
+            echo ""
             echo "Examples:"
             echo "  ./genie.sh \"how many orders were there yesterday?\""
             echo "  ./genie.sh \"top-10 locations by revenue this week\""
@@ -54,48 +57,61 @@ if [ -z "$QUERY" ]; then
     exit 1
 fi
 
-# Step 1: Start conversation
-# Use jq for safe JSON escaping (prevents command injection)
-JSON_BODY=$(jq -n --arg content "$QUERY" '{"content": $content}')
-START_RESPONSE=$(curl -s -X POST "${GENIE_HOST}/api/2.0/genie/spaces/${GENIE_SPACE_ID}/start-conversation" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $GENIE_TOKEN" \
-    -d "$JSON_BODY")
+# Конфиг — после разбора аргументов, чтобы --help работал без CLI и .env.
+source "$SCRIPT_DIR/genie-config.sh"
 
-# Extract conversation and message IDs
-CONVERSATION_ID=$(echo "$START_RESPONSE" | python3 -c "import sys,json; d=json.loads(sys.stdin.read(), strict=False); print(d.get('conversation_id',''))" 2>/dev/null)
-MESSAGE_ID=$(echo "$START_RESPONSE" | python3 -c "import sys,json; d=json.loads(sys.stdin.read(), strict=False); print(d.get('message_id',''))" 2>/dev/null)
+# stderr CLI нужен целиком, чтобы понять причину отказа: подсказка про логин при таймауте
+# или 403 отправила бы агента перелогиниваться, а логин делает только человек в браузере.
+CLI_ERR=$(mktemp)
+GENIE_LOCK=""
+trap 'rm -f "$CLI_ERR"; [[ -z "$GENIE_LOCK" ]] || rmdir "$GENIE_LOCK" 2>/dev/null' EXIT
 
-if [ -z "$CONVERSATION_ID" ] || [ -z "$MESSAGE_ID" ]; then
-    echo "Error: Failed to start conversation"
-    echo "$START_RESPONSE" | head -200
-    exit 1
-fi
+# Параллельные вызовы (волна агентов discovery) обновляли бы истёкший access token одновременно.
+# Если в аккаунте Databricks включены single-use refresh tokens, выигрывает один, остальные
+# получают «refresh token is invalid» и требуют перелогина через браузер. Поэтому токен
+# прогреваем под блокировкой: обновится он один раз, остальные возьмут свежий (живёт час,
+# вопрос — минуты). Ошибка прогрева не фатальна: для профилей не на U2M `auth token` не
+# работает, а настоящий отказ авторизации покажет сам запрос.
+genie_warm_token() {
+    local key lock waited=0
+    key=$(printf '%s' "${GENIE_PROFILE:-${GENIE_HOST:-default}}" | tr -c 'A-Za-z0-9._-' '_')
+    lock="${TMPDIR:-/tmp}/genie-auth-$key.lock"
+    until mkdir "$lock" 2>/dev/null; do
+        # Прогрев держит блокировку не дольше своего таймаута (20 с); дольше её держит только
+        # убитый процесс. GENIE_LOCK_WAIT_SECONDS укорачивает ожидание в тестах.
+        if (( waited >= ${GENIE_LOCK_WAIT_SECONDS:-30} )); then
+            rmdir "$lock" 2>/dev/null || true
+            waited=0
+            continue
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    GENIE_LOCK="$lock"
+    databricks auth token "${GENIE_CLI_ARGS[@]}" --timeout 20s >/dev/null 2>&1 || true
+    rmdir "$lock" 2>/dev/null || true
+    GENIE_LOCK=""
+}
+genie_warm_token
 
-# Step 2: Poll for completion
-MAX_ATTEMPTS=30
-POLL_INTERVAL=2
-
-for ((i=1; i<=MAX_ATTEMPTS; i++)); do
-    RESPONSE=$(curl -s -X GET "${GENIE_HOST}/api/2.0/genie/spaces/${GENIE_SPACE_ID}/conversations/${CONVERSATION_ID}/messages/${MESSAGE_ID}" \
-        -H "Authorization: Bearer $GENIE_TOKEN")
-
-    STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.loads(sys.stdin.read(), strict=False); print(d.get('status',''))" 2>/dev/null)
-
-    if [ "$STATUS" = "COMPLETED" ]; then
-        break
-    elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELLED" ]; then
-        echo "Error: Query $STATUS"
+# CLI сам опрашивает сообщение до COMPLETED и падает на FAILED/CANCELLED. Его таймаут по
+# умолчанию — 20 минут; агенту столько висеть незачем.
+# `--` — чтобы вопрос, начинающийся с дефиса, не разобрался как флаг CLI.
+if ! RESPONSE=$(databricks genie start-conversation "${GENIE_CLI_ARGS[@]}" --timeout 5m -- "$GENIE_SPACE_ID" "$QUERY" 2>"$CLI_ERR"); then
+    cat "$CLI_ERR" >&2
+    # Тексты отказов авторизации CLI v1.13.0: нет кредов, протух refresh token, нет профиля.
+    if grep -qiE 'cannot configure default credentials|refresh token is invalid|invalid_grant|invalid access token|databricks auth login|has no .* profile configured' "$CLI_ERR"; then
+        genie_login_hint
+        exit 2
+    fi
+    if grep -qE 'unknown (command|flag)' "$CLI_ERR"; then
+        echo "Error: this databricks CLI has no 'genie start-conversation --timeout'. Update databricks CLI (tested on v1.13.0): https://docs.databricks.com/aws/en/dev-tools/cli/install" >&2
         exit 1
     fi
-
-    sleep $POLL_INTERVAL
-done
-
-if [ "$STATUS" != "COMPLETED" ]; then
-    echo "Error: Query timed out"
+    echo "Error: Genie request failed, see the databricks CLI error above" >&2
     exit 1
 fi
+cat "$CLI_ERR" >&2
 
 # Raw output mode
 if [ "$RAW_OUTPUT" = true ]; then
@@ -105,7 +121,7 @@ fi
 
 # Parse and display response
 # Pass SHOW_SQL as environment variable to avoid shell injection
-SHOW_SQL_VAR="$SHOW_SQL" echo "$RESPONSE" | python3 -c "
+echo "$RESPONSE" | SHOW_SQL_VAR="$SHOW_SQL" python3 -c "
 import sys
 import json
 import re

@@ -39,6 +39,7 @@ HUB_KNOWN_SECRETS=(
     BUILDIN_BOT_TOKEN
     TIME_TOKEN
     TIME_BOT_TOKEN
+    # PAT genie 1.x: уже не используется, но может остаться в .env — genie о нём предупреждает.
     GENIE_TOKEN
     KUSTO_TOKEN
     TESTOPS_TOKEN
