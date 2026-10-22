@@ -6,11 +6,11 @@
 # ${CLAUDE_PLUGIN_ROOT} — только в плагин-контексте. Этот тест проверяет, что
 # резолвер из реальных .md находит скрипты во всех сценариях:
 #   standalone-клон, subtree-overlay (cwd ≠ корень ai-hub), marketplace-install,
-#   для kaiten — ещё установка через APM (apm_modules/) и запуск в zsh,
+#   для kaiten и ktalk — ещё установка через APM (apm_modules/) и запуск в zsh,
 #   а для скиллов (активируются из произвольного cwd) — ещё symlink-в-~/.claude
 #   и Copilot _direct.
 #
-# Покрытие: buildin, kaiten, time (команды + skill).
+# Покрытие: buildin, kaiten, ktalk, time (команды + skill).
 # Любой провал REQUIRED → exit≠0 → CI красный.
 set -u
 
@@ -21,7 +21,7 @@ SUM="${GITHUB_STEP_SUMMARY:-/dev/null}"
 mk(){ mkdir -p "$(dirname "$1")"; printf '#!/bin/sh\n' > "$1"; }
 
 # integration → каноничный скрипт-маркер (его наличие в резолвнутом каталоге = успех)
-declare -A MARK=( [buildin]=buildin-pages.sh [kaiten]=kaiten-cards.sh [time]=time-messages.sh )
+declare -A MARK=( [buildin]=buildin-pages.sh [kaiten]=kaiten-cards.sh [ktalk]=ktalk-recordings.sh [time]=time-messages.sh )
 
 # ---- извлечение резолвера из .md -------------------------------------------
 extract_cmd_resolver(){ # $1=md $2=integration
@@ -33,10 +33,10 @@ extract_skill_resolver(){ # $1=md  (резолвер skill-time: _t=… → TIME
 
 # ---- прогон одного сценария -------------------------------------------------
 run_cmd(){ # snippet cwd root → каталог скриптов
-  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" bash -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
+  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" bash -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${KTALK_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
 }
 run_cmd_zsh(){ # то же в zsh: Claude Code на macOS выполняет bash-блоки в shell пользователя
-  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" zsh -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
+  ( cd "$2" && CLAUDE_PLUGIN_ROOT="$3" zsh -c "$1"$'\n''printf %s "${BUILDIN_SCRIPTS:-}${KAITEN_SCRIPTS:-}${KTALK_SCRIPTS:-}${TIME_SCRIPTS:-}"' )
 }
 run_skill(){ # snippet cwd root home → полный путь скрипта
   ( cd "$2" && HOME="$4" CLAUDE_PLUGIN_ROOT="$3" bash -c "set -u; $1"$'\n''printf %s "$TIME_MESSAGES"' )
@@ -51,7 +51,7 @@ fail(){ printf '  FAIL  %s\n' "$1"; FAILS=$((FAILS+1)); }
 echo "== Команды (standalone / overlay / marketplace) =="
 { echo "### Резолв пути — команды"; echo; echo "| Интеграция | Файл | Сценарий | Итог |"; echo "|---|---|---|---|"; } >> "$SUM"
 
-for INT in buildin kaiten time; do
+for INT in buildin kaiten ktalk time; do
   M="${MARK[$INT]}"
   ST="$TMP/$INT/standalone"
   OV="$TMP/$INT/overlay"
@@ -72,8 +72,8 @@ for INT in buildin kaiten time; do
     "overlay-subtree, /plugin    |$OV|$OV/integrations/team-overlay/integrations/$INT"
     "marketplace (кеш плагина)   |$UN|$CA"
   )
-  # APM кладёт скрипты пакета в apm_modules/<owner>/<repo>/…; поддержан пока только kaiten
-  [ "$INT" = kaiten ] && SCN+=("apm (apm_modules)           |$AP|")
+  # APM кладёт скрипты пакета в apm_modules/<owner>/<repo>/…; поддержан пока в kaiten и ktalk
+  case "$INT" in kaiten|ktalk) SCN+=("apm (apm_modules)           |$AP|") ;; esac
 
   for md in integrations/$INT/commands/*.md; do
     [ -f "$md" ] || continue
@@ -89,8 +89,8 @@ for INT in buildin kaiten time; do
         fail "$INT/$base — $name → [$dir]"; r=FAIL
       fi
       echo "| $INT | $base | $name | $r |" >> "$SUM"
-      # zsh обрывает строку на шаблоне без совпадений; резолвер kaiten обёрнут в bash -c и обязан работать и там
-      if [ "$INT" = kaiten ]; then
+      # zsh обрывает строку на шаблоне без совпадений; резолверы kaiten и ktalk обёрнуты в bash -c и обязаны работать и там
+      if [ "$INT" = kaiten ] || [ "$INT" = ktalk ]; then
         if command -v zsh >/dev/null 2>&1; then
           zdir="$(run_cmd_zsh "$snip" "$cwd" "$root" 2>/dev/null)"
           if ( cd "$cwd" && [ -f "$zdir/$M" ] ); then
