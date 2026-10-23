@@ -153,6 +153,13 @@ if [[ "$LEVEL" -eq 0 ]]; then
     exit 1
 fi
 
+# Сколько раз повторить ответ 429 (см. цикл запроса ниже). 0 — не повторять.
+KAITEN_RETRIES="${KAITEN_RETRIES:-3}"
+if [[ ! "$KAITEN_RETRIES" =~ ^[0-9]+$ ]]; then
+    echo "Error: KAITEN_RETRIES must be a non-negative integer, got '$KAITEN_RETRIES'" >&2
+    exit 1
+fi
+
 case "$METHOD_UPPER" in
     GET|HEAD)
         ;; # level >= 1, always allowed
@@ -213,19 +220,34 @@ case "${KAITEN_RATE:-}" in
     max) sleep 0.6 ;;
 esac
 
-# Execute request. `|| curl_rc=$?`: под `set -e` присваивание с упавшим $(...) прервало бы
-# скрипт на этой строке (тогда curl_rc=$? — мёртвый код) → ловим код, не роняя errexit.
-curl_rc=0
-response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${KAITEN_API}${ENDPOINT}") || curl_rc=$?
+# Execute request. 429 Kaiten отдаёт до обработки запроса: бакет лимита общий на токен, и соседний
+# агент на том же токене исчерпывает его даже последовательному скрипту. Такой запрос не
+# исполнялся, поэтому повтор безопасен для любого метода, включая запись. Пауза растёт с попыткой
+# (1, 2, 3 с): `Retry-After` у Kaiten всегда 1 с (docs/KAITEN_API.md, Rate Limits), а рост
+# разводит соседей по токену. Таймаут и 5xx не повторяем: запись могла пройти.
+attempt=0
+while :; do
+    # `|| curl_rc=$?`: под `set -e` присваивание с упавшим $(...) прервало бы скрипт на этой
+    # строке (тогда curl_rc=$? — мёртвый код) → ловим код, не роняя errexit.
+    curl_rc=0
+    response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${KAITEN_API}${ENDPOINT}") || curl_rc=$?
 
-# Таймаут/сетевая ошибка curl (напр. 28) → чёткая ошибка, а не пустой ответ с exit 0
-if [[ $curl_rc -ne 0 ]]; then
-    echo "Error: curl не смог выполнить ${METHOD_UPPER} ${ENDPOINT} (exit $curl_rc — таймаут/сеть)" >&2
-    exit 1
-fi
+    # Таймаут/сетевая ошибка curl (напр. 28) → чёткая ошибка, а не пустой ответ с exit 0
+    if [[ $curl_rc -ne 0 ]]; then
+        echo "Error: curl не смог выполнить ${METHOD_UPPER} ${ENDPOINT} (exit $curl_rc — таймаут/сеть)" >&2
+        exit 1
+    fi
 
-# Extract HTTP code (last line)
-http_code=$(echo "$response" | tail -n1)
+    # Extract HTTP code (last line)
+    http_code=$(echo "$response" | tail -n1)
+    if [[ "$http_code" != 429 || "$attempt" -ge "$KAITEN_RETRIES" ]]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    echo "kaiten.sh: лимит запросов (429) на ${METHOD_UPPER} ${ENDPOINT}, повтор ${attempt} из ${KAITEN_RETRIES} через ${attempt} с" >&2
+    sleep "$attempt"
+done
+
 body=$(echo "$response" | sed '$d')
 
 # Check for errors
