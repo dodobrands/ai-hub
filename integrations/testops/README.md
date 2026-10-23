@@ -33,6 +33,15 @@
 ./integrations/testops/scripts/testops.sh POST '/rs/testcase?v2=true' '{"projectId":2298,"name":"New test"}'
 ```
 
+## Таймауты
+
+- Соединение — 15 с (`--connect-timeout`), весь запрос — 120 с (`--max-time`). Без VPN соединение
+  устанавливается, а TLS-рукопожатие висит: без потолка скрипт ждал бы бесконечно.
+- Переопределяются переменными `TESTOPS_CONNECT_TIMEOUT` и `TESTOPS_MAX_TIME` (секунды) — в окружении
+  или в `.env`.
+- Нет ответа — `testops.sh` завершается кодом 1, а в stderr пишет `Error: no response from TestOps …`
+  и причину от curl.
+
 ## Покрытые API
 
 | Домен | Операции |
@@ -53,6 +62,7 @@ integrations/testops/
 ├── scripts/
 │   ├── testops.sh                # Низкоуровневый API (method + endpoint)
 │   └── testops-api.sh            # Высокоуровневые подкоманды
+├── tests/timeouts.bats           # Таймауты и ошибка «нет ответа», curl подменён стабом
 └── README.md
 ```
 
