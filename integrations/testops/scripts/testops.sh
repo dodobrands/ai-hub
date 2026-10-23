@@ -44,8 +44,13 @@ BODY="$3"
 METHOD_UPPER=$(echo "$METHOD" | tr '[:lower:]' '[:upper:]')
 
 # Build curl command
+# Без потолков вызов висит бесконечно: без VPN TCP-соединение устанавливается, а TLS-рукопожатие
+# не завершается. --connect-timeout быстро даёт вердикт «недоступен», --max-time обрывает
+# зависший ответ с запасом на тяжёлые выборки. -S оставляет в stderr причину от curl.
 CURL_ARGS=(
-    -s
+    -sS
+    --connect-timeout "${TESTOPS_CONNECT_TIMEOUT:-15}"
+    --max-time "${TESTOPS_MAX_TIME:-120}"
     -X "$METHOD_UPPER"
     -H "Authorization: Api-token $TESTOPS_TOKEN"
     -H "Content-Type: application/json"
@@ -55,8 +60,15 @@ if [[ -n "$BODY" ]]; then
     CURL_ARGS+=(-d "$BODY")
 fi
 
-# Execute request
-response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${TESTOPS_URL}/api${ENDPOINT}")
+# Execute request. `|| curl_rc=$?`: под `set -e` упавший $(...) завершил бы скрипт молча, с кодом
+# curl, и вызывающий не отличил бы недоступный TestOps от любой другой ошибки.
+curl_rc=0
+response=$(curl "${CURL_ARGS[@]}" -w "\n%{http_code}" "${TESTOPS_URL}/api${ENDPOINT}") || curl_rc=$?
+
+if [[ $curl_rc -ne 0 ]]; then
+    echo "Error: no response from TestOps for ${METHOD_UPPER} ${ENDPOINT} (curl exit $curl_rc: timeout or network)" >&2
+    exit 1
+fi
 
 # Extract HTTP code (last line)
 http_code=$(echo "$response" | tail -n1)
