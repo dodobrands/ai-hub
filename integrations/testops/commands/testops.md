@@ -14,6 +14,8 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
 Скрипты читают из `.env` в корне репозитория:
 - `TESTOPS_URL` — базовый URL инстанса (напр. `https://your-company.qatools.cloud`)
 - `TESTOPS_TOKEN` — персональный API-токен (Profile → API Tokens)
+- `TESTOPS_CONNECT_TIMEOUT`, `TESTOPS_MAX_TIME` — необязательные потолки в секундах (по умолчанию 15 и
+  120). Нет ответа — код 1 и `Error: no response from TestOps …`: TestOps недоступен, проверь сеть и VPN
 
 ## Скрипты
 
