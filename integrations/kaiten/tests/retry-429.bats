@@ -29,9 +29,11 @@ ENV
 #!/usr/bin/env bash
 # N-й вызов отвечает кодом из N-й строки файла codes (нет строки — 200). Код вида curl:28 —
 # сбой самого curl без ответа. HTTP-код идёт последней строкой: kaiten.sh забирает его оттуда.
+# Аргументы каждого вызова — строкой в args: по ним видно, что ушло в повтор.
 dir="$(dirname "$0")/.."
 n=$(( $(cat "$dir/calls" 2>/dev/null || echo 0) + 1 ))
 echo "$n" > "$dir/calls"
+printf '%s\n' "$*" >> "$dir/args"
 code="$(sed -n "${n}p" "$dir/codes" 2>/dev/null)"
 code="${code:-200}"
 case "$code" in
@@ -98,6 +100,10 @@ codes() {
     run bash "$KAITEN" POST /cards/abc/files --file "$SANDBOX/report.html"
     [ "$status" -eq 0 ]
     [ "$(cat "$SANDBOX/calls")" -eq 2 ]
+    # Оба вызова несут файл: одноразовый источник (stdin, удалённый после первой попытки) ушёл бы
+    # в повтор пустым, а счёт вызовов этого не заметил бы.
+    [ "$(grep -c 'file=@' "$SANDBOX/args")" -eq 2 ]
+    [ "$(grep -c 'report.html' "$SANDBOX/args")" -eq 2 ]
 }
 
 @test "5xx is not retried: a write may have gone through" {
@@ -119,6 +125,28 @@ codes() {
 @test "a KAITEN_RETRIES that is not a number fails before any request" {
     run env KAITEN_RETRIES=three bash "$KAITEN" GET /cards/1
     [ "$status" -eq 1 ]
-    [[ "$output" == *"KAITEN_RETRIES must be a non-negative integer"* ]] || false
+    [[ "$output" == *"KAITEN_RETRIES must be an integer from 0 to 10"* ]] || false
     [ ! -e "$SANDBOX/calls" ]
+}
+
+@test "a KAITEN_RETRIES with a leading zero fails before any request" {
+    # bash читает 08 как восьмеричное и не может его сравнить: проверка выхода из цикла молча ложна,
+    # и при устойчивом 429 повтор не кончился бы никогда.
+    run env KAITEN_RETRIES=08 bash "$KAITEN" GET /cards/1
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"KAITEN_RETRIES must be an integer from 0 to 10"* ]] || false
+    [ ! -e "$SANDBOX/calls" ]
+}
+
+@test "a KAITEN_RETRIES above 10 fails before any request" {
+    run env KAITEN_RETRIES=11 bash "$KAITEN" GET /cards/1
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"KAITEN_RETRIES must be an integer from 0 to 10"* ]] || false
+    [ ! -e "$SANDBOX/calls" ]
+}
+
+@test "KAITEN_RETRIES=10 is accepted" {
+    run env KAITEN_RETRIES=10 bash "$KAITEN" GET /cards/1
+    [ "$status" -eq 0 ]
+    [ "$(cat "$SANDBOX/calls")" -eq 1 ]
 }
