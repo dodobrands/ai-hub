@@ -38,9 +38,15 @@
 - Соединение — 15 с (`--connect-timeout`), весь запрос — 120 с (`--max-time`). Без VPN соединение
   устанавливается, а TLS-рукопожатие висит: без потолка скрипт ждал бы бесконечно.
 - Переопределяются переменными `TESTOPS_CONNECT_TIMEOUT` и `TESTOPS_MAX_TIME` (секунды) — в окружении
-  или в `.env`.
-- Нет ответа — `testops.sh` завершается кодом 1, а в stderr пишет `Error: no response from TestOps …`
-  и причину от curl.
+  или в `.env`. Если переменная задана и там и там, побеждает `.env`. Значение не числом — отказ до
+  запроса.
+- Нет ответа — `testops.sh` завершается кодом 1, а в stderr пишет `Error: no response from TestOps …`.
+  Строкой выше curl пишет причину, и по ней видно, что случилось:
+  - `Could not resolve host`, `Failed to connect`, `Connection timed out` — TestOps недоступен: проверь
+    сеть и VPN;
+  - `Operation timed out` — TestOps отвечает медленно: подними `TESTOPS_MAX_TIME`. Запись (метод не GET
+    и не HEAD) при этом могла пройти — скрипт добавляет `a write may have been applied`. Перед повтором
+    проверь, не создана ли она.
 
 ## Покрытые API
 
