@@ -1,6 +1,6 @@
 {
   "name": "kaiten",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "dependencies": ["hub-meta"],
   "description": "Kaiten board automation tools",
   "author": {

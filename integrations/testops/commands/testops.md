@@ -14,6 +14,12 @@ allowed-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
 Скрипты читают из `.env` в корне репозитория:
 - `TESTOPS_URL` — базовый URL инстанса (напр. `https://your-company.qatools.cloud`)
 - `TESTOPS_TOKEN` — персональный API-токен (Profile → API Tokens)
+- `TESTOPS_CONNECT_TIMEOUT`, `TESTOPS_MAX_TIME` — необязательные потолки в секундах (по умолчанию 15 и
+  120; значение из `.env` перекрывает окружение). Нет ответа — код 1 и `Error: no response from TestOps …`,
+  а строкой выше — причина от curl:
+  - `Could not resolve host`, `Failed to connect`, `Connection timed out` — TestOps недоступен, проверь сеть и VPN;
+  - `Operation timed out` — TestOps медленный, подними `TESTOPS_MAX_TIME`. Если метод не GET и не HEAD, скрипт
+    добавляет `a write may have been applied`: перед повтором проверь, не создана ли запись
 
 ## Скрипты
 

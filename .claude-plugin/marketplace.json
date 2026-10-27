@@ -31,7 +31,7 @@
     {
       "name": "kaiten",
       "description": "Kaiten board automation tools — cards, columns, properties, comments",
-      "version": "1.4.2",
+      "version": "1.4.3",
       "author": {
         "name": "AI Hub Contributors"
       },
@@ -130,7 +130,7 @@
     {
       "name": "testops",
       "description": "Allure TestOps integration — test cases, launches, defects, test plans, jobs via REST API",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "AI Hub Contributors"
       },
