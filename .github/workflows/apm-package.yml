@@ -1,0 +1,28 @@
+name: APM package
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/kaiten/**'
+      - '.claude-plugin/marketplace.json'
+      - 'tests/kaiten-apm.py'
+      - '.github/workflows/apm-package.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kaiten-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the APM compatibility baseline
+        run: python -m pip install apm-cli==0.32.0
+      - name: Validate the package without network or credentials
+        run: python tests/kaiten-apm.py -v
