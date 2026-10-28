@@ -1,0 +1,6 @@
+name: kaiten
+version: 1.4.4
+description: Kaiten board automation tools
+dependencies:
+  apm:
+    - dodobrands/ai-hub/integrations/hub-meta#main

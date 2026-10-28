@@ -16,6 +16,24 @@
 └── README.md
 ```
 
+## Установка через APM
+
+```bash
+apm install dodobrands/ai-hub/integrations/kaiten#main --target claude,codex
+```
+
+APM устанавливает `hub-meta` транзитивно по полному адресу из `apm.yml`.
+В `.claude-plugin/plugin.json` сохраняется короткое имя `hub-meta` для Claude
+marketplace: эти два формата описания зависимостей используют разные адреса.
+Команды APM доступны через `.apm/prompts/*.prompt.md` — ссылки на исходники
+`commands/*.md`, без отдельных копий текстов. Скрипты остаются в пакете
+`apm_modules/`; команды находят их штатным резолвером.
+
+При выпуске новой версии синхронно обновляйте `apm.yml`, `.claude-plugin/plugin.json`
+и запись Kaiten в корневом `.claude-plugin/marketplace.json`.
+Проверка упаковки: `python3 tests/kaiten-apm.py` с установленным `apm-cli==0.32.0`.
+Она выполняется в CI и проверяет разбор зависимостей, экспорт всех команд и версии.
+
 ## Быстрый старт
 
 > Нужен плагин `hub-meta`: скрипты берут из него загрузчик `.env` (`hub-meta/scripts/load-env.sh`). При установке плагином Claude Code ставит его сам — он объявлен в `dependencies` в `plugin.json`; в клоне и subtree он и так лежит рядом.
